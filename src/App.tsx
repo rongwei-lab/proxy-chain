@@ -14,7 +14,6 @@ import {
 import {
   generateClashYamlForSelections,
   generateImportLinks,
-  generateXrayJsonForSelections,
   parseProxyInput,
   type NormalizedProxyNode,
 } from './lib'
@@ -58,9 +57,9 @@ const copyText = {
     hostedFetcherAvailable: '同源服务可用',
     hostedFetcherChecking: '正在检测同源服务',
     hostedFetcherUnavailable: '当前页面未检测到同源服务',
-    fetcherEndpointLabel: '外部服务地址',
+    fetcherEndpointLabel: '服务地址',
     fetcherEndpointPlaceholder: 'https://fetch.example.com/fetch-subscription',
-    fetcherTokenLabel: '外部访问令牌',
+    fetcherTokenLabel: '访问令牌',
     fetcherTokenPlaceholder: '外部服务 token，不会保存',
     fetcherModeDirect: '直连',
     fetcherModeHosted: '同源服务',
@@ -94,6 +93,26 @@ const copyText = {
     outputModeClash: 'Clash 配置',
     outputModeXray: 'v2rayN 配置',
     outputModeLinks: '导入链接',
+    v2rayNGuideTitle: 'v2rayN 链式代理配置',
+    v2rayNStepsTitle: 'v2rayN 操作顺序',
+    v2rayNStepPrepareNodes: '先分别添加入口中转节点和出口落地节点，并确认两个节点都可单独连接。',
+    v2rayNStepLandingGroup: '新建落地家宽分组，普通分组的可选地址 URL 保持为空，并把出口落地节点放入该分组。',
+    v2rayNStepChainGroup: '新建“链式代理”分组，切到该分组后右键空白处选择“添加链式代理”。',
+    v2rayNStepUpstream: '选择入口/中转节点，点击“添加到上游”。',
+    v2rayNStepDownstream: '切到落地分组，选择出口/落地节点，点击“添加到下游”。',
+    v2rayNStepSaveTest: '确认顺序为上游中转、下游落地，不要反过来；保存后设为活动服务器并检查出口 IP。',
+    shadowrocketGuideTitle: 'Shadowrocket（小火箭）导入',
+    shadowrocketGuideIntro: 'Shadowrocket 使用 Clash 配置订阅导入链式规则；请先切到“Clash 配置”，生成并复制可访问的 Clash 配置链接。',
+    shadowrocketSubscribeTitle: '通过 Clash 链接添加',
+    shadowrocketStepOpen: '打开 Shadowrocket，点击右上角“+”。',
+    shadowrocketStepType: '在“添加节点”页面点击“类型”，选择“Subscribe（订阅）”。',
+    shadowrocketStepUrl: '在 URL 地址框粘贴 Clash 配置链接。页面里的“导入 Clash”按钮会生成 Clash 导入链接；也可以使用部署后的配置 URL。',
+    shadowrocketStepSave: '点击右上角“保存”，等待 Shadowrocket 下载并更新 Clash 配置节点列表。',
+    shadowrocketRuntimeTitle: '客户端运行设置',
+    shadowrocketRouteSetting: '全局路由：切换为“配置”。不要开启“全局”或“直连”，否则链式中转规则会失效。',
+    shadowrocketEntryNode: '中转前置节点：选择延迟低、速度快的 HK 或 JP 中转节点。',
+    shadowrocketExitNode: '住宅落地节点：按业务需要选择对应静态住宅 IP 节点。',
+    shadowrocketStartVpn: '启动连接：点击顶部开关，在系统 VPN 配置请求中点击“允许”并输入锁屏密码，开关变绿即连接成功。',
     preview: '预览',
     noOutput: '无输出',
     emptyOutput: '分别填写入口和出口后，这里会生成链式代理配置。',
@@ -174,6 +193,26 @@ const copyText = {
     outputModeClash: 'Clash Verge config',
     outputModeXray: 'v2rayN JSON config',
     outputModeLinks: 'Import links',
+    v2rayNGuideTitle: 'v2rayN chained proxy setup',
+    v2rayNStepsTitle: 'v2rayN steps',
+    v2rayNStepPrepareNodes: 'Add the entry relay node and exit landing node separately, and verify both can connect by themselves.',
+    v2rayNStepLandingGroup: 'Create a landing-node group, keep the optional URL field empty for a normal group, and place the exit landing node there.',
+    v2rayNStepChainGroup: 'Create a Chain group, switch to it, then right-click the empty area and choose Add chained proxy.',
+    v2rayNStepUpstream: 'Select the entry/relay node and add it to Upstream.',
+    v2rayNStepDownstream: 'Switch to the landing group, select the exit/landing node, and add it to Downstream.',
+    v2rayNStepSaveTest: 'Confirm upstream is relay and downstream is landing, do not reverse them, then save, set active, and check the exit IP.',
+    shadowrocketGuideTitle: 'Shadowrocket import',
+    shadowrocketGuideIntro: 'Shadowrocket should import the chained rules through a Clash config subscription. Switch to Clash config and use an accessible Clash config link.',
+    shadowrocketSubscribeTitle: 'Add with Clash link',
+    shadowrocketStepOpen: 'Open Shadowrocket and tap the “+” button in the top-right corner.',
+    shadowrocketStepType: 'On the add-node page, tap Type and choose “Subscribe”.',
+    shadowrocketStepUrl: 'Paste the Clash config link into the URL field. The Import Clash button creates a Clash import link; deployed config URLs can also be used.',
+    shadowrocketStepSave: 'Tap Save and wait for Shadowrocket to download and refresh the Clash config node list.',
+    shadowrocketRuntimeTitle: 'Client settings',
+    shadowrocketRouteSetting: 'Global Routing: choose Config. Do not use Global or Direct, otherwise chain forwarding rules will not apply.',
+    shadowrocketEntryNode: 'Front relay node: choose a low-latency HK or JP relay node.',
+    shadowrocketExitNode: 'Residential exit node: choose the static residential IP node required for your use case.',
+    shadowrocketStartVpn: 'Start connection: tap the top switch, allow the iOS VPN prompt, enter the device passcode, and wait until the switch turns green.',
     preview: 'Preview',
     noOutput: 'No output',
     emptyOutput: 'Fill entry and exit inputs to generate chained proxy config.',
@@ -260,16 +299,17 @@ function App() {
     if (outputMode === 'links') {
       return selectedNodes.length > 0 ? generateImportLinks(selectedNodes) : ''
     }
+    if (outputMode === 'xray') {
+      return ''
+    }
     if (selectedEntries.length === 0 || selectedExits.length === 0) {
       return ''
     }
-    return outputMode === 'clash'
-      ? generateClashYamlForSelections(selectedEntries, selectedExits)
-      : generateXrayJsonForSelections(selectedEntries, selectedExits)
+    return generateClashYamlForSelections(selectedEntries, selectedExits)
   }, [outputMode, selectedEntries, selectedExits, selectedNodes])
 
   const outputFileName =
-    outputMode === 'clash' ? 'config.yaml' : outputMode === 'xray' ? 'config.json' : 'import-links.txt'
+    outputMode === 'clash' ? 'config.yaml' : outputMode === 'xray' ? 'manual-v2rayn.txt' : 'import-links.txt'
   const chainLabel = buildChainLabel(selectedEntries, selectedExits, t)
   const entryIsSubscriptionUrl = isHttpSubscriptionInput(entryInput)
   const exitIsSubscriptionUrl = isHttpSubscriptionInput(exitInput)
@@ -469,7 +509,7 @@ function App() {
                 ))}
               </div>
               {showExternalFetcherFields && (
-                <>
+                <div className="fetcher-external-fields">
                   <label>
                     <span>{t.fetcherEndpointLabel}</span>
                     <input
@@ -489,7 +529,7 @@ function App() {
                       onChange={(event) => setFetcherToken(event.target.value)}
                     />
                   </label>
-                </>
+                </div>
               )}
             </div>
           </section>
@@ -636,19 +676,23 @@ function App() {
 
           <div className="preview-meta">
             <span>
-              {t.preview}: {outputFileName}
+              {outputMode === 'xray' ? t.preview : `${t.preview}: ${outputFileName}`}
             </span>
-            <span>{generated ? `${generated.split(/\r?\n/).length} ${t.lines}` : t.noOutput}</span>
+            <span>{outputMode === 'xray' ? t.noOutput : generated ? `${generated.split(/\r?\n/).length} ${t.lines}` : t.noOutput}</span>
           </div>
-          <pre className="code-preview">
-            <code>{generated || t.emptyOutput}</code>
-          </pre>
+          {outputMode === 'clash' && <ShadowrocketGuide copy={t} />}
+          {outputMode === 'xray' && <V2rayNGuide copy={t} />}
+          {outputMode !== 'xray' && (
+            <pre className="code-preview">
+              <code>{generated || t.emptyOutput}</code>
+            </pre>
+          )}
         </section>
       </section>
 
       <footer className="status-bar">
         <StatusChip ok={generated.includes('dialer-proxy') || outputMode !== 'clash'} label={t.yamlStatus} detail={t.yamlDetail} />
-        <StatusChip ok={isValidJsonOutput(outputMode, generated)} label={t.jsonStatus} detail={t.jsonDetail} />
+        <StatusChip ok={outputMode !== 'xray'} label={t.jsonStatus} detail={t.jsonDetail} />
         <StatusChip ok label={t.noUpload} detail={t.noUploadDetail} />
         <div className="status-summary">
           <span>
@@ -663,6 +707,77 @@ function App() {
         </div>
       </footer>
     </main>
+  )
+}
+
+function V2rayNGuide({ copy }: { copy: Record<string, string> }) {
+  const clientSteps = [
+    copy.v2rayNStepPrepareNodes,
+    copy.v2rayNStepLandingGroup,
+    copy.v2rayNStepChainGroup,
+    copy.v2rayNStepUpstream,
+    copy.v2rayNStepDownstream,
+    copy.v2rayNStepSaveTest,
+  ]
+
+  return (
+    <section className="client-guide" aria-labelledby="v2rayn-guide-title">
+      <div className="client-guide-heading">
+        <h3 id="v2rayn-guide-title">{copy.v2rayNGuideTitle}</h3>
+      </div>
+      <div className="client-guide-grid single">
+        <div>
+          <strong>{copy.v2rayNStepsTitle}</strong>
+          <ol>
+            {clientSteps.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function ShadowrocketGuide({ copy }: { copy: Record<string, string> }) {
+  const subscribeSteps = [
+    copy.shadowrocketStepOpen,
+    copy.shadowrocketStepType,
+    copy.shadowrocketStepUrl,
+    copy.shadowrocketStepSave,
+  ]
+  const runtimeSteps = [
+    copy.shadowrocketRouteSetting,
+    copy.shadowrocketEntryNode,
+    copy.shadowrocketExitNode,
+    copy.shadowrocketStartVpn,
+  ]
+
+  return (
+    <section className="client-guide" aria-labelledby="shadowrocket-guide-title">
+      <div className="client-guide-heading">
+        <h3 id="shadowrocket-guide-title">{copy.shadowrocketGuideTitle}</h3>
+        <p>{copy.shadowrocketGuideIntro}</p>
+      </div>
+      <div className="client-guide-grid">
+        <div>
+          <strong>{copy.shadowrocketSubscribeTitle}</strong>
+          <ol>
+            {subscribeSteps.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+        </div>
+        <div>
+          <strong>{copy.shadowrocketRuntimeTitle}</strong>
+          <ul>
+            {runtimeSteps.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </section>
   )
 }
 
@@ -1033,18 +1148,6 @@ async function readFetcherContent(response: Response) {
     throw new Error('fetcher response missing content')
   }
   return payload.content
-}
-
-function isValidJsonOutput(outputMode: OutputMode, generated: string) {
-  if (outputMode !== 'xray') {
-    return true
-  }
-  try {
-    const parsed = JSON.parse(generated) as { outbounds?: Array<{ proxySettings?: unknown }> }
-    return Boolean(parsed.outbounds?.some((outbound) => outbound.proxySettings))
-  } catch {
-    return false
-  }
 }
 
 export default App
