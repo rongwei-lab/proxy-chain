@@ -309,19 +309,36 @@ export interface ChainConfigOptions {
   exitNodeName?: string
 }
 
+export interface ChainSelectionConfigOptions {
+  entryNodeNames?: string[]
+  exitNodeNames?: string[]
+}
+
 export function generateClashYaml(
   entryNode: NormalizedProxyNode,
   exitNode: NormalizedProxyNode,
   options: ChainConfigOptions = {},
 ): string {
-  const { entryName, exitName } = resolveChainNames(entryNode, exitNode, options)
+  return generateClashYamlForSelections([entryNode], [exitNode], {
+    entryNodeNames: options.entryNodeName ? [options.entryNodeName] : undefined,
+    exitNodeNames: options.exitNodeName ? [options.exitNodeName] : undefined,
+  })
+}
+
+export function generateClashYamlForSelections(
+  entryNodes: NormalizedProxyNode[],
+  exitNodes: NormalizedProxyNode[],
+  options: ChainSelectionConfigOptions = {},
+): string {
+  const { entryNames, exitNames } = resolveChainSelectionNames(entryNodes, exitNodes, options)
   const entryGroupName = '入口节点'
-  const entryProxy = toClashProxy(entryNode, entryName)
-  const exitProxy = {
-    ...toClashProxy(exitNode, exitName),
-    // Clash/Mihomo 的 relay 策略已废弃且兼容性差；链式出口应直接用 dialer-proxy 指向入口节点。
+  const entryProxies = entryNodes.map((entryNode, index) => toClashProxy(entryNode, entryNames[index]))
+  const exitProxies = exitNodes.map((exitNode, index) => ({
+    ...toClashProxy(exitNode, exitNames[index]),
+    // Clash/Mihomo 的 relay 策略已废弃且兼容性差；链式出口应直接用 dialer-proxy 指向入口选择组。
+    // 当选择多个入口时，Clash Verge 可以在“入口节点”组里切换真实入口。
     'dialer-proxy': entryGroupName,
-  }
+  }))
   const config: LooseYamlObject = {
     'mixed-port': 7890,
     'allow-lan': false,
@@ -335,17 +352,17 @@ export function generateClashYaml(
       nameserver: ['223.5.5.5', '119.29.29.29'],
       fallback: ['1.1.1.1', '8.8.8.8'],
     },
-    proxies: [entryProxy, exitProxy],
+    proxies: [...entryProxies, ...exitProxies],
     'proxy-groups': [
       {
         name: entryGroupName,
         type: 'select',
-        proxies: [entryName],
+        proxies: entryNames,
       },
       {
         name: 'PROXY',
         type: 'select',
-        proxies: [exitName],
+        proxies: exitNames,
       },
     ],
     rules: ['GEOIP,CN,DIRECT', 'MATCH,PROXY'],
@@ -359,7 +376,19 @@ export function generateXrayJson(
   exitNode: NormalizedProxyNode,
   options: ChainConfigOptions = {},
 ): string {
-  const { entryTag, exitTag } = resolveChainTags(entryNode, exitNode, options)
+  return generateXrayJsonForSelections([entryNode], [exitNode], {
+    entryNodeNames: options.entryNodeName ? [options.entryNodeName] : undefined,
+    exitNodeNames: options.exitNodeName ? [options.exitNodeName] : undefined,
+  })
+}
+
+export function generateXrayJsonForSelections(
+  entryNodes: NormalizedProxyNode[],
+  exitNodes: NormalizedProxyNode[],
+  options: ChainSelectionConfigOptions = {},
+): string {
+  const { entryTags, exitTags } = resolveChainSelectionTags(entryNodes, exitNodes, options)
+  const activeEntryTag = entryTags[0]
   const config = {
     log: { loglevel: 'warning' },
     inbounds: [
@@ -372,12 +401,13 @@ export function generateXrayJson(
       },
     ],
     outbounds: [
-      {
-        ...toXrayOutbound(exitNode, exitTag),
+      ...exitNodes.map((exitNode, index) => ({
+        ...toXrayOutbound(exitNode, exitTags[index]),
         // v2rayN/Xray 自定义 JSON 的链式写法是 proxySettings.tag，而不是 Clash relay。
-        proxySettings: { tag: entryTag },
-      },
-      toXrayOutbound(entryNode, entryTag),
+        // Xray 没有 Clash 那样的 select 入口组；多入口导出时先使用第一个入口作为实际 dialer。
+        proxySettings: { tag: activeEntryTag },
+      })),
+      ...entryNodes.map((entryNode, index) => toXrayOutbound(entryNode, entryTags[index])),
     ],
   }
 
@@ -1061,30 +1091,40 @@ function safeTag(name: string, fallback: string): string {
   return tag || fallback
 }
 
-function resolveChainNames(
-  entryNode: NormalizedProxyNode,
-  exitNode: NormalizedProxyNode,
-  options: ChainConfigOptions,
-): { entryName: string; exitName: string } {
-  const requestedEntryName = options.entryNodeName ?? entryNode.name
-  const requestedExitName = options.exitNodeName ?? exitNode.name
-  const entryName = makeUniqueProxyName(requestedEntryName, '入口')
-  const exitName = makeUniqueProxyName(requestedExitName, '出口', new Set([entryName]))
+function resolveChainSelectionNames(
+  entryNodes: NormalizedProxyNode[],
+  exitNodes: NormalizedProxyNode[],
+  options: ChainSelectionConfigOptions,
+): { entryNames: string[]; exitNames: string[] } {
+  const usedNames = new Set<string>()
+  const entryNames = entryNodes.map((entryNode, index) => {
+    const requestedName = options.entryNodeNames?.[index] ?? entryNode.name
+    return makeUniqueProxyName(requestedName, '入口', usedNames)
+  })
+  const exitNames = exitNodes.map((exitNode, index) => {
+    const requestedName = options.exitNodeNames?.[index] ?? exitNode.name
+    return makeUniqueProxyName(requestedName, '出口', usedNames)
+  })
 
-  return { entryName, exitName }
+  return { entryNames, exitNames }
 }
 
-function resolveChainTags(
-  entryNode: NormalizedProxyNode,
-  exitNode: NormalizedProxyNode,
-  options: ChainConfigOptions,
-): { entryTag: string; exitTag: string } {
-  const requestedEntryName = options.entryNodeName ?? entryNode.name
-  const requestedExitName = options.exitNodeName ?? exitNode.name
-  const entryTag = makeUniqueProxyTag(requestedEntryName, 'entry')
-  const exitTag = makeUniqueProxyTag(requestedExitName, 'exit', new Set([entryTag]))
+function resolveChainSelectionTags(
+  entryNodes: NormalizedProxyNode[],
+  exitNodes: NormalizedProxyNode[],
+  options: ChainSelectionConfigOptions,
+): { entryTags: string[]; exitTags: string[] } {
+  const usedTags = new Set<string>()
+  const entryTags = entryNodes.map((entryNode, index) => {
+    const requestedName = options.entryNodeNames?.[index] ?? entryNode.name
+    return makeUniqueProxyTag(requestedName, 'entry', usedTags)
+  })
+  const exitTags = exitNodes.map((exitNode, index) => {
+    const requestedName = options.exitNodeNames?.[index] ?? exitNode.name
+    return makeUniqueProxyTag(requestedName, 'exit', usedTags)
+  })
 
-  return { entryTag, exitTag }
+  return { entryTags, exitTags }
 }
 
 function makeUniqueProxyName(baseName: string, role: '入口' | '出口', usedNames = new Set<string>()): string {
@@ -1099,6 +1139,7 @@ function makeUniqueProxyName(baseName: string, role: '入口' | '出口', usedNa
     index += 1
   }
 
+  usedNames.add(candidate)
   return candidate
 }
 
@@ -1113,6 +1154,7 @@ function makeUniqueProxyTag(baseName: string, role: 'entry' | 'exit', usedTags =
     index += 1
   }
 
+  usedTags.add(candidate)
   return candidate
 }
 

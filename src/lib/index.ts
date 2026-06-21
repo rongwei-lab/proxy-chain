@@ -1,6 +1,7 @@
 export type {
   BaseProxyNode,
   ChainConfigOptions,
+  ChainSelectionConfigOptions,
   Hysteria2ProxyNode,
   NormalizedProxyNode,
   ParseResult,
@@ -12,8 +13,10 @@ export type {
 
 export {
   generateClashYaml,
+  generateClashYamlForSelections,
   generateImportLinks,
   generateXrayJson,
+  generateXrayJsonForSelections,
   parseHysteria2Link,
   parseProxyInput,
   parseShadowsocksLink,

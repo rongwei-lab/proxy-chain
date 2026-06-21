@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   generateClashYaml,
+  generateClashYamlForSelections,
   generateImportLinks,
   generateXrayJson,
+  generateXrayJsonForSelections,
   parseHysteria2Link,
   parseProxyInput,
   parseShadowsocksLink,
@@ -278,6 +280,64 @@ describe('proxy-chain generation', () => {
     expect(yaml).toContain('name: 香港-出口')
     expect(yaml).toContain('dialer-proxy: 入口节点')
     expect(new Set(names).size).toBe(names.length)
+  })
+
+  it('Clash/Mihomo 多选导出时入口组和出口组包含所有选中节点', () => {
+    const entries = [
+      parseSocks5Link('socks5://user:pass@entry-1.example.com:1080#Entry'),
+      parseSocks5Link('socks5://user:pass@entry-2.example.com:1081#Entry'),
+    ]
+    const exits = [
+      parseSocks5Link('socks5://user:pass@exit-1.example.com:1080#Exit'),
+      parseShadowsocksLink('ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpleGl0LXBhc3M@exit-2.example.com:8388#Exit'),
+    ]
+    expect(entries.every(Boolean)).toBe(true)
+    expect(exits.every(Boolean)).toBe(true)
+
+    const yaml = generateClashYamlForSelections(
+      entries.filter((node): node is NonNullable<typeof node> => Boolean(node)),
+      exits.filter((node): node is NonNullable<typeof node> => Boolean(node)),
+    )
+
+    expect(yaml).toContain('name: Entry-入口')
+    expect(yaml).toContain('name: Entry-入口-2')
+    expect(yaml).toContain('name: Exit-出口')
+    expect(yaml).toContain('name: Exit-出口-2')
+    expect(yaml.match(/dialer-proxy: 入口节点/g)).toHaveLength(2)
+    expect(yaml).toContain('proxies:\n      - Entry-入口\n      - Entry-入口-2')
+    expect(yaml).toContain('proxies:\n      - Exit-出口\n      - Exit-出口-2')
+  })
+
+  it('v2rayN/Xray 多选导出时多个出口都链到第一个入口', () => {
+    const entries = [
+      parseVlessLink(vlessLink),
+      parseSocks5Link('socks5://user:pass@entry-2.example.com:1081#Entry 2'),
+    ]
+    const exits = [
+      parseSocks5Link('socks5://user:pass@exit-1.example.com:1080#Exit 1'),
+      parseSocks5Link('socks5://user:pass@exit-2.example.com:1081#Exit 2'),
+    ]
+    expect(entries.every(Boolean)).toBe(true)
+    expect(exits.every(Boolean)).toBe(true)
+
+    const config = JSON.parse(
+      generateXrayJsonForSelections(
+        entries.filter((node): node is NonNullable<typeof node> => Boolean(node)),
+        exits.filter((node): node is NonNullable<typeof node> => Boolean(node)),
+      ),
+    ) as {
+      outbounds: Array<{ tag: string; proxySettings?: { tag: string } }>
+    }
+
+    expect(config.outbounds).toHaveLength(4)
+    expect(config.outbounds[0].proxySettings?.tag).toBe('VLESS-Reality-entry')
+    expect(config.outbounds[1].proxySettings?.tag).toBe('VLESS-Reality-entry')
+    expect(config.outbounds.map((outbound) => outbound.tag)).toEqual([
+      'Exit-1-exit',
+      'Exit-2-exit',
+      'VLESS-Reality-entry',
+      'Entry-2-entry',
+    ])
   })
 
   it('生成 import links 文本', () => {

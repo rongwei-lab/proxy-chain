@@ -11,9 +11,9 @@ import {
   Trash2,
 } from 'lucide-react'
 import {
-  generateClashYaml,
+  generateClashYamlForSelections,
   generateImportLinks,
-  generateXrayJson,
+  generateXrayJsonForSelections,
   parseProxyInput,
   type NormalizedProxyNode,
 } from './lib'
@@ -55,6 +55,9 @@ const copyText = {
     chainDescription: '链路会按“入口 → 出口”生成；配置字段会自动使用对应客户端的链式写法。',
     entry: '入口',
     exit: '出口',
+    selected: '已选',
+    selectAll: '全选',
+    clearSelection: '清空选择',
     missingEntry: '未找到可用入口节点',
     missingExit: '未找到可用出口节点',
     outputTitle: '输出',
@@ -77,6 +80,7 @@ const copyText = {
     noUploadDetail: '浏览器本地',
     nodes: '候选',
     chain: '链路',
+    selectedSummary: '已选节点',
     waitingChain: '等待选择入口和出口',
     languageLabel: '语言',
     zhLanguage: '中文',
@@ -111,6 +115,9 @@ const copyText = {
     chainDescription: 'The generated chain follows entry → exit and uses each client’s native chaining field.',
     entry: 'Entry',
     exit: 'Exit',
+    selected: 'Selected',
+    selectAll: 'Select all',
+    clearSelection: 'Clear selection',
     missingEntry: 'No supported entry node found',
     missingExit: 'No supported exit node found',
     outputTitle: 'Output',
@@ -133,6 +140,7 @@ const copyText = {
     noUploadDetail: 'browser local',
     nodes: 'Candidates',
     chain: 'Chain',
+    selectedSummary: 'Selected nodes',
     waitingChain: 'Waiting for entry and exit',
     languageLabel: 'Language',
     zhLanguage: 'Chinese',
@@ -160,8 +168,8 @@ function App() {
   const [outputMode, setOutputMode] = useState<OutputMode>('clash')
   const [entryInput, setEntryInput] = useState('')
   const [exitInput, setExitInput] = useState('')
-  const [entryId, setEntryId] = useState('')
-  const [exitId, setExitId] = useState('')
+  const [entryIds, setEntryIds] = useState<string[] | undefined>()
+  const [exitIds, setExitIds] = useState<string[] | undefined>()
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [fetchState, setFetchState] = useState<Record<FetchSlot, FetchState>>({
     entry: 'idle',
@@ -178,46 +186,44 @@ function App() {
   const exitParsed = useMemo(() => parseProxyInput(exitInput), [exitInput])
   const entryCandidates = entryParsed.nodes
   const exitCandidates = exitParsed.nodes
-  const allNodes = useMemo(
-    () => [...entryParsed.nodes, ...exitParsed.nodes],
-    [entryParsed.nodes, exitParsed.nodes],
-  )
 
-  const selectedEntry = useMemo(
-    () => pickNode(entryCandidates, entryId),
-    [entryCandidates, entryId],
+  const selectedEntryIds = useMemo(() => resolveSelectedIds(entryIds, entryCandidates), [entryIds, entryCandidates])
+  const selectedExitIds = useMemo(() => resolveSelectedIds(exitIds, exitCandidates), [exitIds, exitCandidates])
+  const selectedEntries = useMemo(
+    () => pickSelectedNodes(entryCandidates, selectedEntryIds),
+    [entryCandidates, selectedEntryIds],
   )
-  const selectedExit = useMemo(
-    () => pickNode(exitCandidates, exitId),
-    [exitCandidates, exitId],
+  const selectedExits = useMemo(
+    () => pickSelectedNodes(exitCandidates, selectedExitIds),
+    [exitCandidates, selectedExitIds],
   )
+  const selectedNodes = useMemo(() => [...selectedEntries, ...selectedExits], [selectedEntries, selectedExits])
 
   const generated = useMemo(() => {
     if (outputMode === 'links') {
-      return allNodes.length > 0 ? generateImportLinks(allNodes) : ''
+      return selectedNodes.length > 0 ? generateImportLinks(selectedNodes) : ''
     }
-    if (!selectedEntry || !selectedExit) {
+    if (selectedEntries.length === 0 || selectedExits.length === 0) {
       return ''
     }
     return outputMode === 'clash'
-      ? generateClashYaml(selectedEntry, selectedExit)
-      : generateXrayJson(selectedEntry, selectedExit)
-  }, [allNodes, outputMode, selectedEntry, selectedExit])
+      ? generateClashYamlForSelections(selectedEntries, selectedExits)
+      : generateXrayJsonForSelections(selectedEntries, selectedExits)
+  }, [outputMode, selectedEntries, selectedExits, selectedNodes])
 
   const outputFileName =
     outputMode === 'clash' ? 'config.yaml' : outputMode === 'xray' ? 'config.json' : 'import-links.txt'
-  const chainLabel =
-    selectedEntry && selectedExit ? `${selectedEntry.name} ${t.chainArrow} ${selectedExit.name}` : t.waitingChain
+  const chainLabel = buildChainLabel(selectedEntries, selectedExits, t)
   const entryIsSubscriptionUrl = isHttpSubscriptionInput(entryInput)
   const exitIsSubscriptionUrl = isHttpSubscriptionInput(exitInput)
 
   function setInputValue(slot: FetchSlot, value: string) {
     if (slot === 'entry') {
       setEntryInput(value)
-      setEntryId('')
+      setEntryIds(undefined)
     } else {
       setExitInput(value)
-      setExitId('')
+      setExitIds(undefined)
     }
     setFetchState((current) => ({ ...current, [slot]: 'idle' }))
   }
@@ -393,20 +399,26 @@ function App() {
               </div>
             </div>
             <div className="chain-grid">
-              <NodeSelect
+              <NodeMultiSelect
                 label={t.entry}
                 nodes={entryCandidates}
-                value={selectedEntry?.id ?? ''}
+                selectedIds={selectedEntryIds}
                 emptyText={t.missingEntry}
-                onChange={setEntryId}
+                selectedLabel={t.selected}
+                selectAllLabel={t.selectAll}
+                clearSelectionLabel={t.clearSelection}
+                onChange={(ids) => setEntryIds(ids)}
               />
               <div className="chain-arrow">{t.chainArrow}</div>
-              <NodeSelect
+              <NodeMultiSelect
                 label={t.exit}
                 nodes={exitCandidates}
-                value={selectedExit?.id ?? ''}
+                selectedIds={selectedExitIds}
                 emptyText={t.missingExit}
-                onChange={setExitId}
+                selectedLabel={t.selected}
+                selectAllLabel={t.selectAll}
+                clearSelectionLabel={t.clearSelection}
+                onChange={(ids) => setExitIds(ids)}
               />
             </div>
           </div>
@@ -462,6 +474,9 @@ function App() {
         <div className="status-summary">
           <span>
             {t.nodes}: {entryCandidates.length + exitCandidates.length}
+          </span>
+          <span>
+            {t.selectedSummary}: {selectedNodes.length}
           </span>
           <span>
             {t.chain}: {chainLabel}
@@ -588,30 +603,89 @@ function ProxyInputCard({
   )
 }
 
-interface NodeSelectProps {
+interface NodeMultiSelectProps {
   label: string
   nodes: NormalizedProxyNode[]
-  value: string
+  selectedIds: string[]
   emptyText: string
-  onChange: (value: string) => void
+  selectedLabel: string
+  selectAllLabel: string
+  clearSelectionLabel: string
+  onChange: (value: string[]) => void
 }
 
-function NodeSelect({ label, nodes, value, emptyText, onChange }: NodeSelectProps) {
+function NodeMultiSelect({
+  label,
+  nodes,
+  selectedIds,
+  emptyText,
+  selectedLabel,
+  selectAllLabel,
+  clearSelectionLabel,
+  onChange,
+}: NodeMultiSelectProps) {
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
+  const selectedCount = nodes.filter((node) => selectedSet.has(node.id)).length
+
+  function toggleNode(nodeId: string, checked: boolean) {
+    if (checked) {
+      onChange([...selectedIds, nodeId].filter((id, index, ids) => ids.indexOf(id) === index))
+      return
+    }
+    onChange(selectedIds.filter((id) => id !== nodeId))
+  }
+
   return (
-    <label className="node-select">
-      <span>{label}</span>
-      <select value={value} onChange={(event) => onChange(event.target.value)} disabled={nodes.length === 0}>
+    <section className="node-select" aria-label={label}>
+      <div className="node-select-header">
+        <span>{label}</span>
+        <span>
+          {selectedLabel} {selectedCount}/{nodes.length}
+        </span>
+      </div>
+      <div className="node-select-actions">
+        <button
+          className="ghost-button compact"
+          type="button"
+          disabled={nodes.length === 0 || selectedCount === nodes.length}
+          onClick={() => onChange(nodes.map((node) => node.id))}
+        >
+          <CheckCircle2 size={15} />
+          {selectAllLabel}
+        </button>
+        <button
+          className="ghost-button compact"
+          type="button"
+          disabled={selectedCount === 0}
+          onClick={() => onChange([])}
+        >
+          <Trash2 size={15} />
+          {clearSelectionLabel}
+        </button>
+      </div>
+      <div className="node-list" role="group" aria-label={label}>
         {nodes.length === 0 ? (
-          <option value="">{emptyText}</option>
+          <div className="node-list-empty">{emptyText}</div>
         ) : (
-          nodes.map((node) => (
-            <option key={node.id} value={node.id}>
-              {node.name} · {node.type.toUpperCase()}
-            </option>
-          ))
+          nodes.map((node) => {
+            const checked = selectedSet.has(node.id)
+
+            return (
+              <label className={`node-option ${checked ? 'selected' : ''}`} key={node.id}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(event) => toggleNode(node.id, event.target.checked)}
+                />
+                <span>
+                  {node.name} · {node.type.toUpperCase()}
+                </span>
+              </label>
+            )
+          })
         )}
-      </select>
-    </label>
+      </div>
+    </section>
   )
 }
 
@@ -627,8 +701,33 @@ function StatusChip({ ok, label, detail }: { ok: boolean; label: string; detail:
   )
 }
 
-function pickNode(nodes: NormalizedProxyNode[], selectedId: string) {
-  return nodes.find((node) => node.id === selectedId) ?? nodes[0]
+function resolveSelectedIds(selectedIds: string[] | undefined, nodes: NormalizedProxyNode[]) {
+  if (selectedIds === undefined) {
+    return nodes[0] ? [nodes[0].id] : []
+  }
+
+  const availableIds = new Set(nodes.map((node) => node.id))
+  return selectedIds.filter((id) => availableIds.has(id))
+}
+
+function pickSelectedNodes(nodes: NormalizedProxyNode[], selectedIds: string[]) {
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  return selectedIds.map((id) => byId.get(id)).filter((node): node is NormalizedProxyNode => Boolean(node))
+}
+
+function buildChainLabel(
+  selectedEntries: NormalizedProxyNode[],
+  selectedExits: NormalizedProxyNode[],
+  t: Record<string, string>,
+) {
+  if (selectedEntries.length === 0 || selectedExits.length === 0) {
+    return t.waitingChain
+  }
+
+  const entryLabel =
+    selectedEntries.length === 1 ? selectedEntries[0].name : `${selectedEntries.length} ${t.entry}`
+  const exitLabel = selectedExits.length === 1 ? selectedExits[0].name : `${selectedExits.length} ${t.exit}`
+  return `${entryLabel} ${t.chainArrow} ${exitLabel}`
 }
 
 function isHttpSubscriptionInput(value: string) {

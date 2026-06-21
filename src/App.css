@@ -226,7 +226,7 @@
 }
 
 .editor-label,
-.node-select > span {
+.node-select-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -236,7 +236,8 @@
   font-weight: 720;
 }
 
-.editor-label span {
+.editor-label span,
+.node-select-header span:last-child {
   color: #8a94a6;
   font-weight: 620;
 }
@@ -360,6 +361,71 @@
 
 .node-select {
   min-width: 0;
+}
+
+.node-select-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.node-list {
+  display: grid;
+  gap: 6px;
+  min-height: 114px;
+  max-height: 236px;
+  padding: 8px;
+  overflow: auto;
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.node-option {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #233047;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.node-option:hover {
+  background: #f6f9ff;
+}
+
+.node-option.selected {
+  border-color: #acd0ff;
+  background: #edf5ff;
+}
+
+.node-option input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: #0969ff;
+}
+
+.node-option span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-list-empty {
+  display: grid;
+  min-height: 86px;
+  place-items: center;
+  color: #8a94a6;
+  font-size: 13px;
+  text-align: center;
 }
 
 .node-select select {
