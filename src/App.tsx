@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   Clipboard,
   Download,
+  ExternalLink,
   GitBranch,
   LockKeyhole,
   RotateCcw,
@@ -25,6 +26,7 @@ type FetchSlot = 'entry' | 'exit'
 type FetchState = 'idle' | 'loading' | 'success' | 'failed' | 'unsupported'
 type FetchMode = 'auto' | 'hosted' | 'direct' | 'service'
 type SameOriginFetcherState = 'checking' | 'available' | 'unavailable'
+type ImportState = 'idle' | 'packing' | 'opened' | 'failed'
 
 const outputModes: OutputMode[] = ['clash', 'xray', 'links']
 
@@ -52,7 +54,7 @@ const copyText = {
     fetchFailed: '订阅拉取失败：可能被跨域策略、网络或订阅服务限制拦截。可以在浏览器打开订阅后复制配置内容粘贴。',
     subscriptionUrlHint: '检测到订阅地址。请点击“拉取订阅”；成功后输入框会替换为完整 Mihomo/Clash 配置内容并自动解析。也可以在浏览器打开订阅后复制完整配置粘贴。',
     fetcherTitle: '订阅拉取服务',
-    fetcherDescription: '部署在 Cloudflare Worker 时会自动使用同源后端，用户无需填写服务地址或令牌；静态站点仍可填写外部自建服务。',
+    fetcherDescription: '优先使用同源后端拉取订阅；只有选择外部服务时才需要填写地址和令牌。',
     hostedFetcherAvailable: '同源服务可用',
     hostedFetcherChecking: '正在检测同源服务',
     hostedFetcherUnavailable: '当前页面未检测到同源服务',
@@ -65,7 +67,7 @@ const copyText = {
     fetcherModeService: '外部服务',
     fetcherModeAuto: '自动',
     fetchFailedHosted: '订阅拉取失败：同源服务不可用或订阅域名未被允许。',
-    fetchFailedWithManaged: '订阅拉取失败：同源服务和浏览器直连都未成功。请检查允许域名或订阅链接，也可以填写外部服务。',
+    fetchFailedWithManaged: '订阅拉取失败：同源服务和浏览器直连都未成功。请检查允许域名或订阅链接，也可以切换到外部服务。',
     fetchFailedWithService: '订阅拉取失败：同源服务、浏览器直连和外部服务都未成功。请检查服务地址、令牌、允许域名或订阅链接。',
     parsedPrefix: '已解析',
     parsedSuffix: '个候选',
@@ -80,6 +82,10 @@ const copyText = {
     missingExit: '未找到可用出口节点',
     outputTitle: '输出',
     outputDescription: '生成内容只在当前浏览器会话中存在。',
+    importClash: '导入 Clash',
+    importingClash: '准备中...',
+    importClashOpened: '已唤起 Clash',
+    importClashFailed: '导入链接生成失败',
     copy: '复制',
     copied: '已复制',
     failed: '失败',
@@ -128,7 +134,7 @@ const copyText = {
     fetchFailed: 'Failed to fetch subscription. It may be blocked by CORS, network, or provider policy. Open it in your browser and paste the YAML content instead.',
     subscriptionUrlHint: 'Subscription URL detected. Click “Fetch subscription”; after success the input will be replaced with full Mihomo/Clash config content and parsed automatically. You can also open the URL in your browser and paste the full config here.',
     fetcherTitle: 'Subscription fetcher',
-    fetcherDescription: 'When hosted on Cloudflare Workers, the same-origin backend is used automatically without exposing an endpoint or token. Static deployments can still use an external service.',
+    fetcherDescription: 'The app prefers the same-origin backend. Endpoint and token are shown only when External is selected.',
     hostedFetcherAvailable: 'Same-origin service available',
     hostedFetcherChecking: 'Checking same-origin service',
     hostedFetcherUnavailable: 'No same-origin service detected on this page',
@@ -141,7 +147,7 @@ const copyText = {
     fetcherModeService: 'External',
     fetcherModeAuto: 'Auto',
     fetchFailedHosted: 'Failed to fetch subscription. The same-origin service is unavailable or the subscription host is not allowed.',
-    fetchFailedWithManaged: 'Failed to fetch subscription. Same-origin service and browser direct fetch both failed. Check the allowed host or subscription URL, or fill an external service.',
+    fetchFailedWithManaged: 'Failed to fetch subscription. Same-origin service and browser direct fetch both failed. Check the allowed host or subscription URL, or switch to External.',
     fetchFailedWithService: 'Failed to fetch subscription. Same-origin service, browser direct fetch, and external service all failed. Check endpoint, token, allowed host, or subscription URL.',
     parsedPrefix: 'Parsed',
     parsedSuffix: 'candidates',
@@ -156,6 +162,10 @@ const copyText = {
     missingExit: 'No supported exit node found',
     outputTitle: 'Output',
     outputDescription: 'Generated content stays in this browser session.',
+    importClash: 'Import Clash',
+    importingClash: 'Preparing...',
+    importClashOpened: 'Clash opened',
+    importClashFailed: 'Import link failed',
     copy: 'Copy',
     copied: 'Copied',
     failed: 'Failed',
@@ -209,6 +219,7 @@ function App() {
   const [entryIds, setEntryIds] = useState<string[] | undefined>()
   const [exitIds, setExitIds] = useState<string[] | undefined>()
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const [importState, setImportState] = useState<ImportState>('idle')
   const [fetchState, setFetchState] = useState<Record<FetchSlot, FetchState>>({
     entry: 'idle',
     exit: 'idle',
@@ -220,7 +231,7 @@ function App() {
     links: t.outputModeLinks,
   }
   const sameOriginFetcherAvailable = sameOriginFetcherState === 'available'
-  const showExternalFetcherFields = fetchMode === 'auto' || fetchMode === 'service'
+  const showExternalFetcherFields = fetchMode === 'service'
   const hostedFetcherStatusLabel =
     sameOriginFetcherState === 'available'
       ? t.hostedFetcherAvailable
@@ -266,9 +277,7 @@ function App() {
     fetchMode === 'hosted'
       ? t.fetchFailedHosted
       : fetchMode === 'auto'
-        ? fetcherEndpoint.trim() && fetcherToken.trim()
-          ? t.fetchFailedWithService
-          : t.fetchFailedWithManaged
+        ? t.fetchFailedWithManaged
         : fetchMode === 'service'
           ? t.fetchFailedWithService
           : t.fetchFailed
@@ -346,6 +355,23 @@ function App() {
       setCopyState('failed')
     } finally {
       window.setTimeout(() => setCopyState('idle'), 1600)
+    }
+  }
+
+  async function importClashOutput() {
+    if (!generated || outputMode !== 'clash') {
+      return
+    }
+
+    setImportState('packing')
+    try {
+      const importUrl = await buildClashImportUrl(generated)
+      window.location.href = importUrl
+      setImportState('opened')
+    } catch {
+      setImportState('failed')
+    } finally {
+      window.setTimeout(() => setImportState('idle'), 2200)
     }
   }
 
@@ -569,6 +595,21 @@ function App() {
               <p>{t.outputDescription}</p>
             </div>
             <div className="button-row">
+              <button
+                className="accent-button"
+                type="button"
+                disabled={!sameOriginFetcherAvailable || !generated || outputMode !== 'clash' || importState === 'packing'}
+                onClick={importClashOutput}
+              >
+                <ExternalLink size={16} />
+                {importState === 'packing'
+                  ? t.importingClash
+                  : importState === 'opened'
+                    ? t.importClashOpened
+                    : importState === 'failed'
+                      ? t.importClashFailed
+                      : t.importClash}
+              </button>
               <button className="ghost-button" type="button" disabled={!generated} onClick={copyOutput}>
                 <Clipboard size={16} />
                 {copyState === 'copied' ? t.copied : copyState === 'failed' ? t.failed : t.copy}
@@ -898,18 +939,11 @@ async function loadSubscriptionContent(
     try {
       return await fetchSameOriginSubscription(sourceUrl)
     } catch {
-      // 同源 Worker 可用但拉取失败时，继续尝试浏览器直连和用户填写的外部服务，给临时故障留一条退路。
+      // 同源 Worker 可用但拉取失败时，继续尝试浏览器直连，给临时故障留一条退路。
     }
   }
 
-  try {
-    return await fetchDirectSubscription(sourceUrl)
-  } catch (directError) {
-    if (!options.endpoint || !options.token) {
-      throw directError
-    }
-    return fetchViaSubscriptionService(sourceUrl, options)
-  }
+  return fetchDirectSubscription(sourceUrl)
 }
 
 async function fetchDirectSubscription(sourceUrl: string) {
@@ -939,6 +973,33 @@ async function fetchSameOriginSubscription(sourceUrl: string) {
   }
 
   return readFetcherContent(response)
+}
+
+async function buildClashImportUrl(configYaml: string) {
+  const configUrl = await createTemporaryClashConfigUrl(configYaml)
+  return `clash://install-config?url=${encodeURIComponent(configUrl)}`
+}
+
+async function createTemporaryClashConfigUrl(configYaml: string) {
+  const response = await fetch('/api/clash-config', {
+    method: 'POST',
+    cache: 'no-store',
+    credentials: 'same-origin',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ content: configYaml }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`temporary config HTTP ${response.status}`)
+  }
+
+  const payload = await response.json() as { url?: unknown }
+  if (typeof payload.url !== 'string') {
+    throw new Error('temporary config URL missing')
+  }
+  return new URL(payload.url, window.location.origin).toString()
 }
 
 async function fetchViaSubscriptionService(

@@ -2,8 +2,8 @@
   min-height: 100svh;
   padding: 24px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 248, 252, 0.96)),
-    #f6f8fc;
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 253, 0.98)),
+    #f7f9fc;
 }
 
 .topbar {
@@ -117,6 +117,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 18px;
+  align-items: start;
   max-width: 1440px;
   margin: 0 auto;
 }
@@ -125,13 +126,19 @@
 .status-bar {
   border: 1px solid #dfe6f1;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 16px 44px rgba(40, 58, 90, 0.08);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 32px rgba(40, 58, 90, 0.06);
 }
 
 .panel {
   min-width: 0;
   padding: 18px;
+}
+
+.output-panel {
+  position: sticky;
+  top: 18px;
+  align-self: start;
 }
 
 .panel-heading {
@@ -160,6 +167,7 @@
 
 .segmented-control button,
 .ghost-button,
+.accent-button,
 .primary-button {
   display: inline-flex;
   align-items: center;
@@ -199,7 +207,7 @@
 
 .fetcher-card {
   margin-bottom: 14px;
-  padding: 14px;
+  padding: 16px;
   border: 1px solid #dbe4f0;
   border-radius: 8px;
   background: #f8fbff;
@@ -259,11 +267,11 @@
 }
 
 .fetcher-controls.with-external {
-  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr) minmax(0, 240px);
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr) minmax(0, 260px);
 }
 
 .fetcher-controls.managed-only {
-  grid-template-columns: minmax(260px, 320px);
+  grid-template-columns: minmax(300px, 520px);
 }
 
 .fetcher-controls label {
@@ -309,7 +317,7 @@
 
 .input-card {
   min-width: 0;
-  padding: 14px;
+  padding: 16px;
   border: 1px solid #dbe4f0;
   border-radius: 8px;
   background: #fbfcff;
@@ -364,7 +372,7 @@
 }
 
 .input-editor {
-  min-height: 290px;
+  min-height: 260px;
   padding: 16px;
   resize: vertical;
   color: #1f2937;
@@ -379,7 +387,7 @@
 }
 
 .split-editor {
-  min-height: 210px;
+  min-height: 190px;
   max-height: 46svh;
 }
 
@@ -399,6 +407,7 @@
 }
 
 .ghost-button,
+.accent-button,
 .primary-button {
   height: 40px;
   padding: 0 14px;
@@ -409,6 +418,12 @@
   color: #263347;
   border: 1px solid #dbe4f0;
   background: #fff;
+}
+
+.accent-button {
+  color: #075985;
+  border: 1px solid #bae6fd;
+  background: #f0f9ff;
 }
 
 .ghost-button.compact {
@@ -425,6 +440,7 @@
 }
 
 .ghost-button:disabled,
+.accent-button:disabled,
 .primary-button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
@@ -607,7 +623,7 @@
 }
 
 .output-tabs {
-  width: min(420px, 100%);
+  width: min(460px, 100%);
 }
 
 .preview-meta {
@@ -620,7 +636,7 @@
 }
 
 .code-preview {
-  min-height: 548px;
+  min-height: 420px;
   max-height: 66svh;
   margin: 0;
   padding: 16px 18px;
@@ -709,7 +725,13 @@
     display: grid;
   }
 
-  .fetcher-controls {
+  .output-panel {
+    position: static;
+  }
+
+  .fetcher-controls,
+  .fetcher-controls.with-external,
+  .fetcher-controls.managed-only {
     grid-template-columns: 1fr;
   }
 

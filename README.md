@@ -151,6 +151,14 @@ npm run cf:app:deploy
 
 页面部署成功后，前端会自动检测同源 `/api/healthz`。状态显示“同源服务可用”时，用户点击“拉取订阅”会走同源后端，不需要填写服务地址和 token。
 
+同源 Worker 模式还支持“一键导入 Clash”。流程是：
+
+1. 前端把当前生成的 Clash YAML 通过 `/api/clash-config` 发送给公开 Worker。
+2. Worker 把配置放入 Cloudflare Cache，生成一个 10 分钟有效的临时短 URL。
+3. 前端打开 `clash://install-config?url=<临时配置URL>`，由 Clash Verge/Clash 客户端拉取并导入配置。
+
+这个临时配置不会写入仓库、KV、D1 或本地存储；但在有效期内，拿到短 URL 的客户端可以读取该配置。请不要把包含真实节点的导入链接公开分享。
+
 ### 3. 本地调试 Cloudflare Worker
 
 内部 Worker：
