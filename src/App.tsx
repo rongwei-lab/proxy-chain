@@ -9,6 +9,7 @@ import {
   LockKeyhole,
   RotateCcw,
   ShieldCheck,
+  SquareArrowDown,
   TerminalSquare,
   Trash2,
 } from 'lucide-react'
@@ -48,6 +49,11 @@ const copyText = {
     editorLabel: '代理链接 / 节点片段',
     lines: '行',
     clear: '清空',
+    fetchSubscription: '拉取订阅',
+    fetchingSubscription: '拉取中...',
+    fetchSuccess: '订阅内容已加载，已在本地解析。',
+    fetchUnsupported: '请输入 http(s) 订阅地址后再拉取。',
+    fetchFailed: '订阅拉取失败：可能被 CORS、网络或订阅服务限制拦截。可以在浏览器打开订阅后复制 YAML 内容粘贴。',
     parsedPrefix: '已解析',
     parsedSuffix: '个节点',
     chainTitle: '链式代理',
@@ -84,6 +90,11 @@ const copyText = {
     editorLabel: 'Proxy links / snippets',
     lines: 'lines',
     clear: 'Clear',
+    fetchSubscription: 'Fetch subscription',
+    fetchingSubscription: 'Fetching...',
+    fetchSuccess: 'Subscription content loaded and parsed locally.',
+    fetchUnsupported: 'Enter an http(s) subscription URL before fetching.',
+    fetchFailed: 'Failed to fetch subscription. It may be blocked by CORS, network, or provider policy. Open it in your browser and paste the YAML content instead.',
     parsedPrefix: 'Parsed',
     parsedSuffix: 'nodes',
     chainTitle: 'Chain',
@@ -156,6 +167,7 @@ function App() {
   const [entryId, setEntryId] = useState('')
   const [exitId, setExitId] = useState('')
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const [fetchState, setFetchState] = useState<'idle' | 'loading' | 'success' | 'failed' | 'unsupported'>('idle')
   const t = copyText[language]
 
   const parsed = useMemo(() => parseProxyInput(input), [input])
@@ -200,6 +212,31 @@ function App() {
   function handleModeChange(mode: InputMode) {
     setInputMode(mode)
     loadExample(mode)
+  }
+
+  async function fetchSubscription() {
+    const source = input.trim()
+
+    if (!/^https?:\/\//i.test(source)) {
+      setFetchState('unsupported')
+      return
+    }
+
+    setFetchState('loading')
+    try {
+      // 订阅拉取只在用户点击后发生；不会自动请求，也不会经过后端保存或转发。
+      const response = await fetch(source, { cache: 'no-store' })
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+      const text = await response.text()
+      setInput(text)
+      setEntryId('')
+      setExitId('')
+      setFetchState('success')
+    } catch {
+      setFetchState('failed')
+    }
   }
 
   async function copyOutput() {
@@ -320,10 +357,21 @@ function App() {
           />
 
           <div className="input-actions">
-            <button className="ghost-button" type="button" onClick={() => setInput('')}>
-              <Trash2 size={16} />
-              {t.clear}
-            </button>
+            <div className="input-button-row">
+              <button className="ghost-button" type="button" onClick={() => setInput('')}>
+                <Trash2 size={16} />
+                {t.clear}
+              </button>
+              <button
+                className="ghost-button"
+                type="button"
+                disabled={fetchState === 'loading'}
+                onClick={fetchSubscription}
+              >
+                <SquareArrowDown size={16} />
+                {fetchState === 'loading' ? t.fetchingSubscription : t.fetchSubscription}
+              </button>
+            </div>
             <div className="node-count">
               {t.parsedPrefix} <strong>{parsed.nodes.length}</strong> {t.parsedSuffix}
             </div>
@@ -361,6 +409,15 @@ function App() {
               {parsed.warnings.slice(0, 2).map((warning) => (
                 <span key={warning}>{warning}</span>
               ))}
+            </div>
+          )}
+          {fetchState !== 'idle' && fetchState !== 'loading' && (
+            <div className={`fetch-message ${fetchState}`}>
+              {fetchState === 'success'
+                ? t.fetchSuccess
+                : fetchState === 'unsupported'
+                  ? t.fetchUnsupported
+                  : t.fetchFailed}
             </div>
           )}
         </section>

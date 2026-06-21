@@ -241,6 +241,12 @@
   margin-top: 12px;
 }
 
+.input-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .ghost-button,
 .primary-button {
   height: 40px;
@@ -339,6 +345,25 @@
   color: #8a4b00;
   background: #fff7e8;
   font-size: 13px;
+}
+
+.fetch-message {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.fetch-message.success {
+  color: #0f7a3e;
+  background: #ecfdf3;
+}
+
+.fetch-message.failed,
+.fetch-message.unsupported {
+  color: #8a4b00;
+  background: #fff7e8;
 }
 
 .output-heading {
@@ -458,6 +483,7 @@
   .topbar,
   .panel-heading,
   .input-actions,
+  .input-button-row,
   .output-heading,
   .button-row {
     flex-direction: column;
