@@ -190,6 +190,41 @@
   box-shadow: inset 0 0 0 1px #8bbcff;
 }
 
+.dual-input-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  align-items: stretch;
+}
+
+.input-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  background: #fbfcff;
+}
+
+.input-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.input-card-heading h3 {
+  margin: 0 0 4px;
+  color: #111827;
+  font-size: 16px;
+  font-weight: 760;
+}
+
+.input-card-heading p {
+  max-width: 56ch;
+  color: #657083;
+  font-size: 13px;
+}
+
 .editor-label,
 .node-select > span {
   display: flex;
@@ -232,6 +267,11 @@
   box-shadow: 0 0 0 3px rgba(15, 124, 255, 0.14);
 }
 
+.split-editor {
+  min-height: 210px;
+  max-height: 46svh;
+}
+
 .input-actions,
 .button-row {
   display: flex;
@@ -260,6 +300,13 @@
   background: #fff;
 }
 
+.ghost-button.compact {
+  min-height: 34px;
+  height: 34px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
 .primary-button {
   color: #fff;
   background: #0969ff;
@@ -273,8 +320,10 @@
 }
 
 .node-count {
+  flex: 0 0 auto;
   color: #657083;
   font-size: 13px;
+  white-space: nowrap;
 }
 
 .node-count strong {
@@ -482,6 +531,7 @@
 @media (max-width: 640px) {
   .topbar,
   .panel-heading,
+  .input-card-heading,
   .input-actions,
   .input-button-row,
   .output-heading,
@@ -509,5 +559,14 @@
 
   .chain-arrow {
     height: 20px;
+  }
+
+  .input-card {
+    padding: 12px;
+  }
+
+  .split-editor {
+    min-height: 180px;
+    max-height: none;
   }
 }
