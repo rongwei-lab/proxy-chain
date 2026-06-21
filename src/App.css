@@ -53,6 +53,45 @@
   font-size: 13px;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.language-toggle {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(72px, auto));
+  overflow: hidden;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.language-toggle button {
+  height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-right: 1px solid #dbe3ef;
+  color: #526174;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.language-toggle button:last-child {
+  border-right: 0;
+}
+
+.language-toggle button.active {
+  color: #0969ff;
+  background: #eaf2ff;
+}
+
 .privacy-strip {
   display: flex;
   align-items: center;
@@ -399,6 +438,10 @@
 
   .topbar {
     align-items: flex-start;
+  }
+
+  .topbar-actions {
+    justify-content: flex-start;
   }
 
   .workspace {

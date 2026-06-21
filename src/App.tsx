@@ -23,6 +23,7 @@ import './App.css'
 
 type InputMode = 'links' | 'subscription' | 'snippet'
 type OutputMode = 'clash' | 'xray' | 'links'
+type Language = 'zh' | 'en'
 
 const inputModes: Array<{ id: InputMode; label: string; icon: typeof Link2 }> = [
   { id: 'links', label: 'Import links', icon: Link2 },
@@ -35,6 +36,81 @@ const outputModes: Array<{ id: OutputMode; label: string }> = [
   { id: 'xray', label: 'v2rayN JSON' },
   { id: 'links', label: 'Import links' },
 ]
+
+const copyText = {
+  zh: {
+    subtitle: '本地优先的链式代理配置生成器',
+    privacyLabel: '隐私状态',
+    inputTitle: '输入',
+    inputDescription: '粘贴代理链接、节点片段，或 Mihomo/Clash 订阅 YAML 内容。',
+    examples: '示例',
+    inputType: '输入类型',
+    editorLabel: '代理链接 / 节点片段',
+    lines: '行',
+    clear: '清空',
+    parsedPrefix: '已解析',
+    parsedSuffix: '个节点',
+    chainTitle: '链式代理',
+    chainDescription: '入口建议选择 VLESS Reality，出口选择 SOCKS5 或 Hysteria2。',
+    entry: '入口',
+    exit: '出口',
+    missingEntry: '未找到 VLESS 入口',
+    missingExit: '未找到 SOCKS5/HY2 出口',
+    outputTitle: '输出',
+    outputDescription: '生成内容只在当前浏览器会话中存在。',
+    copy: '复制',
+    copied: '已复制',
+    failed: '失败',
+    download: '下载',
+    outputType: '输出类型',
+    preview: '预览',
+    noOutput: '无输出',
+    emptyOutput: '选择入口节点和出口节点后，这里会生成链式代理配置。',
+    yamlDetail: 'dialer-proxy',
+    jsonDetail: 'proxySettings',
+    noUploadDetail: '浏览器本地',
+    nodes: '节点',
+    chain: '链路',
+    waitingChain: '等待选择入口和出口',
+    languageLabel: '语言',
+  },
+  en: {
+    subtitle: 'Local-first chained proxy config generator',
+    privacyLabel: 'Privacy status',
+    inputTitle: 'Input',
+    inputDescription: 'Paste proxy links, node snippets, or Mihomo/Clash subscription YAML.',
+    examples: 'Examples',
+    inputType: 'Input type',
+    editorLabel: 'Proxy links / snippets',
+    lines: 'lines',
+    clear: 'Clear',
+    parsedPrefix: 'Parsed',
+    parsedSuffix: 'nodes',
+    chainTitle: 'Chain',
+    chainDescription: 'Use VLESS Reality as entry, then SOCKS5 or Hysteria2 as exit.',
+    entry: 'Entry',
+    exit: 'Exit',
+    missingEntry: 'No VLESS entry found',
+    missingExit: 'No SOCKS5/HY2 exit found',
+    outputTitle: 'Output',
+    outputDescription: 'Generated content stays in this browser session.',
+    copy: 'Copy',
+    copied: 'Copied',
+    failed: 'Failed',
+    download: 'Download',
+    outputType: 'Output type',
+    preview: 'Preview',
+    noOutput: 'No output',
+    emptyOutput: 'Select an entry and exit node to generate chained proxy config.',
+    yamlDetail: 'dialer-proxy',
+    jsonDetail: 'proxySettings',
+    noUploadDetail: 'browser local',
+    nodes: 'Nodes',
+    chain: 'Chain',
+    waitingChain: 'Waiting for entry and exit',
+    languageLabel: 'Language',
+  },
+} satisfies Record<Language, Record<string, string>>
 
 const examples: Record<InputMode, string> = {
   links: [
@@ -73,12 +149,14 @@ udp: false`,
 }
 
 function App() {
+  const [language, setLanguage] = useState<Language>('zh')
   const [inputMode, setInputMode] = useState<InputMode>('links')
   const [outputMode, setOutputMode] = useState<OutputMode>('clash')
   const [input, setInput] = useState(examples.links)
   const [entryId, setEntryId] = useState('')
   const [exitId, setExitId] = useState('')
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const t = copyText[language]
 
   const parsed = useMemo(() => parseProxyInput(input), [input])
   const entryCandidates = useMemo(() => parsed.nodes.filter((node) => node.type === 'vless'), [parsed.nodes])
@@ -111,7 +189,7 @@ function App() {
   const outputFileName =
     outputMode === 'clash' ? 'config.yaml' : outputMode === 'xray' ? 'config.json' : 'import-links.txt'
   const chainLabel =
-    selectedEntry && selectedExit ? `${selectedEntry.name} -> ${selectedExit.name}` : '等待选择入口和出口'
+    selectedEntry && selectedExit ? `${selectedEntry.name} -> ${selectedExit.name}` : t.waitingChain
 
   function loadExample(mode = inputMode) {
     setInput(examples[mode])
@@ -160,18 +238,36 @@ function App() {
           </div>
           <div>
             <h1>Proxy Chain Lab</h1>
-            <p>本地优先的链式代理配置生成器</p>
+            <p>{t.subtitle}</p>
           </div>
         </div>
-        <div className="privacy-strip" aria-label="隐私状态">
-          <span>
-            <LockKeyhole size={15} />
-            Local only
-          </span>
-          <span>
-            <CheckCircle2 size={15} />
-            No upload
-          </span>
+        <div className="topbar-actions">
+          <div className="language-toggle" role="group" aria-label={t.languageLabel}>
+            <button
+              type="button"
+              className={language === 'zh' ? 'active' : ''}
+              onClick={() => setLanguage('zh')}
+            >
+              中文
+            </button>
+            <button
+              type="button"
+              className={language === 'en' ? 'active' : ''}
+              onClick={() => setLanguage('en')}
+            >
+              English
+            </button>
+          </div>
+          <div className="privacy-strip" aria-label={t.privacyLabel}>
+            <span>
+              <LockKeyhole size={15} />
+              Local only
+            </span>
+            <span>
+              <CheckCircle2 size={15} />
+              No upload
+            </span>
+          </div>
         </div>
       </header>
 
@@ -179,16 +275,16 @@ function App() {
         <section className="panel input-panel" aria-labelledby="input-title">
           <div className="panel-heading">
             <div>
-              <h2 id="input-title">Input</h2>
-              <p>粘贴代理链接、节点片段，或 Mihomo/Clash 订阅 YAML 内容。</p>
+              <h2 id="input-title">{t.inputTitle}</h2>
+              <p>{t.inputDescription}</p>
             </div>
             <button className="ghost-button" type="button" onClick={() => loadExample()}>
               <RotateCcw size={16} />
-              Examples
+              {t.examples}
             </button>
           </div>
 
-          <div className="segmented-control" role="tablist" aria-label="输入类型">
+          <div className="segmented-control" role="tablist" aria-label={t.inputType}>
             {inputModes.map((mode) => {
               const Icon = mode.icon
               return (
@@ -206,8 +302,10 @@ function App() {
           </div>
 
           <label className="editor-label" htmlFor="proxy-input">
-            Proxy links / snippets
-            <span>{input.split(/\r?\n/).filter(Boolean).length} lines</span>
+            {t.editorLabel}
+            <span>
+              {input.split(/\r?\n/).filter(Boolean).length} {t.lines}
+            </span>
           </label>
           <textarea
             id="proxy-input"
@@ -224,10 +322,10 @@ function App() {
           <div className="input-actions">
             <button className="ghost-button" type="button" onClick={() => setInput('')}>
               <Trash2 size={16} />
-              Clear
+              {t.clear}
             </button>
             <div className="node-count">
-              已解析 <strong>{parsed.nodes.length}</strong> 个节点
+              {t.parsedPrefix} <strong>{parsed.nodes.length}</strong> {t.parsedSuffix}
             </div>
           </div>
 
@@ -235,24 +333,24 @@ function App() {
             <div className="chain-title">
               <GitBranch size={19} />
               <div>
-                <h3>Chain</h3>
-                <p>入口建议选择 VLESS Reality，出口选择 SOCKS5 或 Hysteria2。</p>
+                <h3>{t.chainTitle}</h3>
+                <p>{t.chainDescription}</p>
               </div>
             </div>
             <div className="chain-grid">
               <NodeSelect
-                label="Entry"
+                label={t.entry}
                 nodes={entryCandidates}
                 value={selectedEntry?.id ?? ''}
-                emptyText="未找到 VLESS 入口"
+                emptyText={t.missingEntry}
                 onChange={setEntryId}
               />
               <div className="chain-arrow">{'->'}</div>
               <NodeSelect
-                label="Exit"
+                label={t.exit}
                 nodes={exitCandidates}
                 value={selectedExit?.id ?? ''}
-                emptyText="未找到 SOCKS5/HY2 出口"
+                emptyText={t.missingExit}
                 onChange={setExitId}
               />
             </div>
@@ -270,22 +368,22 @@ function App() {
         <section className="panel output-panel" aria-labelledby="output-title">
           <div className="panel-heading output-heading">
             <div>
-              <h2 id="output-title">Output</h2>
-              <p>生成内容只在当前浏览器会话中存在。</p>
+              <h2 id="output-title">{t.outputTitle}</h2>
+              <p>{t.outputDescription}</p>
             </div>
             <div className="button-row">
               <button className="ghost-button" type="button" disabled={!generated} onClick={copyOutput}>
                 <Clipboard size={16} />
-                {copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Failed' : 'Copy'}
+                {copyState === 'copied' ? t.copied : copyState === 'failed' ? t.failed : t.copy}
               </button>
               <button className="primary-button" type="button" disabled={!generated} onClick={downloadOutput}>
                 <Download size={16} />
-                Download
+                {t.download}
               </button>
             </div>
           </div>
 
-          <div className="segmented-control output-tabs" role="tablist" aria-label="输出类型">
+          <div className="segmented-control output-tabs" role="tablist" aria-label={t.outputType}>
             {outputModes.map((mode) => (
               <button
                 key={mode.id}
@@ -299,22 +397,28 @@ function App() {
           </div>
 
           <div className="preview-meta">
-            <span>Preview: {outputFileName}</span>
-            <span>{generated ? `${generated.split(/\r?\n/).length} lines` : 'No output'}</span>
+            <span>
+              {t.preview}: {outputFileName}
+            </span>
+            <span>{generated ? `${generated.split(/\r?\n/).length} ${t.lines}` : t.noOutput}</span>
           </div>
           <pre className="code-preview">
-            <code>{generated || '选择入口节点和出口节点后，这里会生成链式代理配置。'}</code>
+            <code>{generated || t.emptyOutput}</code>
           </pre>
         </section>
       </section>
 
       <footer className="status-bar">
-        <StatusChip ok={generated.includes('dialer-proxy') || outputMode !== 'clash'} label="YAML OK" detail="dialer-proxy" />
-        <StatusChip ok={isValidJsonOutput(outputMode, generated)} label="JSON OK" detail="proxySettings" />
-        <StatusChip ok label="No upload" detail="browser local" />
+        <StatusChip ok={generated.includes('dialer-proxy') || outputMode !== 'clash'} label="YAML OK" detail={t.yamlDetail} />
+        <StatusChip ok={isValidJsonOutput(outputMode, generated)} label="JSON OK" detail={t.jsonDetail} />
+        <StatusChip ok label="No upload" detail={t.noUploadDetail} />
         <div className="status-summary">
-          <span>Nodes: {parsed.nodes.length}</span>
-          <span>Chain: {chainLabel}</span>
+          <span>
+            {t.nodes}: {parsed.nodes.length}
+          </span>
+          <span>
+            {t.chain}: {chainLabel}
+          </span>
         </div>
       </footer>
     </main>
