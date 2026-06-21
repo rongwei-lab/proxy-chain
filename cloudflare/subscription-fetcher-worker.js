@@ -1,5 +1,13 @@
-export default {
-  async fetch(request, env) {
+import { WorkerEntrypoint } from 'cloudflare:workers'
+
+export default class SubscriptionFetcherWorker extends WorkerEntrypoint {
+  async fetchSubscription(url) {
+    const targetUrl = validateTargetUrl(url, this.env)
+    return fetchSubscriptionContent(targetUrl, this.env)
+  }
+
+  async fetch(request) {
+    const env = this.env
     const origin = request.headers.get('origin')
     const corsHeaders = buildCorsHeaders(origin, env)
 
@@ -27,7 +35,7 @@ export default {
     try {
       const body = await request.json()
       const targetUrl = validateTargetUrl(body.url, env)
-      const content = await fetchSubscription(targetUrl, env)
+      const content = await fetchSubscriptionContent(targetUrl, env)
 
       return jsonResponse(
         {
@@ -44,7 +52,7 @@ export default {
         corsHeaders,
       )
     }
-  },
+  }
 }
 
 function buildCorsHeaders(origin, env) {
@@ -90,14 +98,14 @@ function validateTargetUrl(rawUrl, env) {
     throw httpError(403, 'host_not_allowed')
   }
 
-  if (isBlockedHost(targetUrl.hostname)) {
+  if (isBlockedHostname(targetUrl.hostname)) {
     throw httpError(403, 'blocked_host')
   }
 
   return targetUrl
 }
 
-async function fetchSubscription(targetUrl, env) {
+async function fetchSubscriptionContent(targetUrl, env) {
   const timeoutMs = Number(env.FETCH_TIMEOUT_MS || 12000)
   const maxBytes = Number(env.MAX_RESPONSE_BYTES || 2 * 1024 * 1024)
   const controller = new AbortController()
@@ -165,7 +173,7 @@ function parseList(value) {
   )
 }
 
-function isBlockedHost(hostname) {
+function isBlockedHostname(hostname) {
   const normalized = hostname.toLowerCase()
 
   return (

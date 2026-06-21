@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   CheckCircle2,
   Clipboard,
@@ -23,6 +23,8 @@ type OutputMode = 'clash' | 'xray' | 'links'
 type Language = 'zh' | 'en'
 type FetchSlot = 'entry' | 'exit'
 type FetchState = 'idle' | 'loading' | 'success' | 'failed' | 'unsupported'
+type FetchMode = 'auto' | 'hosted' | 'direct' | 'service'
+type SameOriginFetcherState = 'checking' | 'available' | 'unavailable'
 
 const outputModes: OutputMode[] = ['clash', 'xray', 'links']
 
@@ -31,8 +33,8 @@ const copyText = {
     appName: '链式代理实验室',
     subtitle: '本地优先的链式代理配置生成器',
     privacyLabel: '隐私状态',
-    localOnly: '仅本地处理',
-    noUpload: '不上传',
+    localOnly: '本地解析',
+    noUpload: '不保存',
     inputTitle: '输入',
     inputDescription: '入口和出口分开粘贴；订阅地址需要先拉取成完整配置内容，再从候选里选择节点。',
     entryInputTitle: '入口输入',
@@ -50,15 +52,21 @@ const copyText = {
     fetchFailed: '订阅拉取失败：可能被跨域策略、网络或订阅服务限制拦截。可以在浏览器打开订阅后复制配置内容粘贴。',
     subscriptionUrlHint: '检测到订阅地址。请点击“拉取订阅”；成功后输入框会替换为完整 Mihomo/Clash 配置内容并自动解析。也可以在浏览器打开订阅后复制完整配置粘贴。',
     fetcherTitle: '订阅拉取服务',
-    fetcherDescription: '可选。部署自己的拉取服务后，浏览器无法跨域直连的订阅也可以通过你的服务器读取。',
-    fetcherEndpointLabel: '服务地址',
+    fetcherDescription: '部署在 Cloudflare Worker 时会自动使用同源后端，用户无需填写服务地址或令牌；静态站点仍可填写外部自建服务。',
+    hostedFetcherAvailable: '同源服务可用',
+    hostedFetcherChecking: '正在检测同源服务',
+    hostedFetcherUnavailable: '当前页面未检测到同源服务',
+    fetcherEndpointLabel: '外部服务地址',
     fetcherEndpointPlaceholder: 'https://fetch.example.com/fetch-subscription',
-    fetcherTokenLabel: '访问令牌',
-    fetcherTokenPlaceholder: 'Bearer token，不会保存到本地',
+    fetcherTokenLabel: '外部访问令牌',
+    fetcherTokenPlaceholder: '外部服务 token，不会保存',
     fetcherModeDirect: '直连',
-    fetcherModeService: '自建服务',
+    fetcherModeHosted: '同源服务',
+    fetcherModeService: '外部服务',
     fetcherModeAuto: '自动',
-    fetchFailedWithService: '订阅拉取失败：直连和自建服务都未成功。请检查服务地址、令牌、允许域名或订阅链接。',
+    fetchFailedHosted: '订阅拉取失败：同源服务不可用或订阅域名未被允许。',
+    fetchFailedWithManaged: '订阅拉取失败：同源服务和浏览器直连都未成功。请检查允许域名或订阅链接，也可以填写外部服务。',
+    fetchFailedWithService: '订阅拉取失败：同源服务、浏览器直连和外部服务都未成功。请检查服务地址、令牌、允许域名或订阅链接。',
     parsedPrefix: '已解析',
     parsedSuffix: '个候选',
     chainTitle: '链式代理',
@@ -87,7 +95,7 @@ const copyText = {
     jsonStatus: '链路就绪',
     yamlDetail: '链式字段',
     jsonDetail: '链式字段',
-    noUploadDetail: '浏览器本地',
+    noUploadDetail: '仅当前会话',
     nodes: '候选',
     chain: '链路',
     selectedSummary: '已选节点',
@@ -101,8 +109,8 @@ const copyText = {
     appName: 'Proxy Chain Lab',
     subtitle: 'Local-first chained proxy config generator',
     privacyLabel: 'Privacy status',
-    localOnly: 'Local only',
-    noUpload: 'No upload',
+    localOnly: 'Local parsing',
+    noUpload: 'No storage',
     inputTitle: 'Input',
     inputDescription: 'Paste entry and exit separately. Fetch subscription URLs into full config content before selecting nodes.',
     entryInputTitle: 'Entry input',
@@ -120,15 +128,21 @@ const copyText = {
     fetchFailed: 'Failed to fetch subscription. It may be blocked by CORS, network, or provider policy. Open it in your browser and paste the YAML content instead.',
     subscriptionUrlHint: 'Subscription URL detected. Click “Fetch subscription”; after success the input will be replaced with full Mihomo/Clash config content and parsed automatically. You can also open the URL in your browser and paste the full config here.',
     fetcherTitle: 'Subscription fetcher',
-    fetcherDescription: 'Optional. After deploying your own fetcher, subscriptions blocked by browser CORS can be read through your server.',
-    fetcherEndpointLabel: 'Service endpoint',
+    fetcherDescription: 'When hosted on Cloudflare Workers, the same-origin backend is used automatically without exposing an endpoint or token. Static deployments can still use an external service.',
+    hostedFetcherAvailable: 'Same-origin service available',
+    hostedFetcherChecking: 'Checking same-origin service',
+    hostedFetcherUnavailable: 'No same-origin service detected on this page',
+    fetcherEndpointLabel: 'External endpoint',
     fetcherEndpointPlaceholder: 'https://fetch.example.com/fetch-subscription',
-    fetcherTokenLabel: 'Access token',
-    fetcherTokenPlaceholder: 'Bearer token, not stored locally',
+    fetcherTokenLabel: 'External token',
+    fetcherTokenPlaceholder: 'External service token, not stored',
     fetcherModeDirect: 'Direct',
-    fetcherModeService: 'Service',
+    fetcherModeHosted: 'Same-origin',
+    fetcherModeService: 'External',
     fetcherModeAuto: 'Auto',
-    fetchFailedWithService: 'Failed to fetch subscription. Direct fetch and self-hosted service both failed. Check endpoint, token, allowed host, or subscription URL.',
+    fetchFailedHosted: 'Failed to fetch subscription. The same-origin service is unavailable or the subscription host is not allowed.',
+    fetchFailedWithManaged: 'Failed to fetch subscription. Same-origin service and browser direct fetch both failed. Check the allowed host or subscription URL, or fill an external service.',
+    fetchFailedWithService: 'Failed to fetch subscription. Same-origin service, browser direct fetch, and external service all failed. Check endpoint, token, allowed host, or subscription URL.',
     parsedPrefix: 'Parsed',
     parsedSuffix: 'candidates',
     chainTitle: 'Chain',
@@ -157,7 +171,7 @@ const copyText = {
     jsonStatus: 'JSON OK',
     yamlDetail: 'chain field',
     jsonDetail: 'chain field',
-    noUploadDetail: 'browser local',
+    noUploadDetail: 'session only',
     nodes: 'Candidates',
     chain: 'Chain',
     selectedSummary: 'Selected nodes',
@@ -186,7 +200,8 @@ const exitExample = [
 function App() {
   const [language, setLanguage] = useState<Language>('zh')
   const [outputMode, setOutputMode] = useState<OutputMode>('clash')
-  const [fetchMode, setFetchMode] = useState<'direct' | 'service' | 'auto'>('auto')
+  const [fetchMode, setFetchMode] = useState<FetchMode>('auto')
+  const [sameOriginFetcherState, setSameOriginFetcherState] = useState<SameOriginFetcherState>('checking')
   const [fetcherEndpoint, setFetcherEndpoint] = useState('')
   const [fetcherToken, setFetcherToken] = useState('')
   const [entryInput, setEntryInput] = useState('')
@@ -204,6 +219,14 @@ function App() {
     xray: t.outputModeXray,
     links: t.outputModeLinks,
   }
+  const sameOriginFetcherAvailable = sameOriginFetcherState === 'available'
+  const showExternalFetcherFields = fetchMode === 'auto' || fetchMode === 'service'
+  const hostedFetcherStatusLabel =
+    sameOriginFetcherState === 'available'
+      ? t.hostedFetcherAvailable
+      : sameOriginFetcherState === 'checking'
+        ? t.hostedFetcherChecking
+        : t.hostedFetcherUnavailable
 
   const entryParsed = useMemo(() => parseProxyInput(entryInput), [entryInput])
   const exitParsed = useMemo(() => parseProxyInput(exitInput), [exitInput])
@@ -239,9 +262,40 @@ function App() {
   const chainLabel = buildChainLabel(selectedEntries, selectedExits, t)
   const entryIsSubscriptionUrl = isHttpSubscriptionInput(entryInput)
   const exitIsSubscriptionUrl = isHttpSubscriptionInput(exitInput)
-  const fetchFailedMessage = fetchMode !== 'direct' && fetcherEndpoint.trim()
-    ? t.fetchFailedWithService
-    : t.fetchFailed
+  const fetchFailedMessage =
+    fetchMode === 'hosted'
+      ? t.fetchFailedHosted
+      : fetchMode === 'auto'
+        ? fetcherEndpoint.trim() && fetcherToken.trim()
+          ? t.fetchFailedWithService
+          : t.fetchFailedWithManaged
+        : fetchMode === 'service'
+          ? t.fetchFailedWithService
+          : t.fetchFailed
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function detectSameOriginFetcher() {
+      try {
+        const response = await fetch('/api/healthz', { cache: 'no-store' })
+        if (!cancelled) {
+          setSameOriginFetcherState(response.ok ? 'available' : 'unavailable')
+        }
+      } catch {
+        if (!cancelled) {
+          setSameOriginFetcherState('unavailable')
+        }
+      }
+    }
+
+    // 只探测健康检查，不携带订阅地址；这样 GitHub Pages 模式也不会把用户输入泄露给不存在的 API。
+    void detectSameOriginFetcher()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   function setInputValue(slot: FetchSlot, value: string) {
     if (slot === 'entry') {
@@ -270,6 +324,7 @@ function App() {
     try {
       const content = await loadSubscriptionContent(source, {
         endpoint: fetcherEndpoint.trim(),
+        sameOriginAvailable: sameOriginFetcherAvailable,
         token: fetcherToken.trim(),
         mode: fetchMode,
       })
@@ -364,11 +419,16 @@ function App() {
                 <h3>{t.fetcherTitle}</h3>
                 <p>{t.fetcherDescription}</p>
               </div>
+              <span className={`fetcher-status ${sameOriginFetcherState}`}>
+                <CheckCircle2 size={15} />
+                {hostedFetcherStatusLabel}
+              </span>
             </div>
-            <div className="fetcher-controls">
+            <div className={`fetcher-controls ${showExternalFetcherFields ? 'with-external' : 'managed-only'}`}>
               <div className="segmented-control fetcher-mode" role="tablist" aria-label={t.fetcherTitle}>
                 {[
                   { value: 'auto', label: t.fetcherModeAuto },
+                  { value: 'hosted', label: t.fetcherModeHosted },
                   { value: 'direct', label: t.fetcherModeDirect },
                   { value: 'service', label: t.fetcherModeService },
                 ].map((mode) => (
@@ -376,31 +436,35 @@ function App() {
                     key={mode.value}
                     className={fetchMode === mode.value ? 'active' : ''}
                     type="button"
-                    onClick={() => setFetchMode(mode.value as 'direct' | 'service' | 'auto')}
+                    onClick={() => setFetchMode(mode.value as FetchMode)}
                   >
                     {mode.label}
                   </button>
                 ))}
               </div>
-              <label>
-                <span>{t.fetcherEndpointLabel}</span>
-                <input
-                  value={fetcherEndpoint}
-                  placeholder={t.fetcherEndpointPlaceholder}
-                  spellCheck={false}
-                  onChange={(event) => setFetcherEndpoint(event.target.value)}
-                />
-              </label>
-              <label>
-                <span>{t.fetcherTokenLabel}</span>
-                <input
-                  value={fetcherToken}
-                  placeholder={t.fetcherTokenPlaceholder}
-                  spellCheck={false}
-                  type="password"
-                  onChange={(event) => setFetcherToken(event.target.value)}
-                />
-              </label>
+              {showExternalFetcherFields && (
+                <>
+                  <label>
+                    <span>{t.fetcherEndpointLabel}</span>
+                    <input
+                      value={fetcherEndpoint}
+                      placeholder={t.fetcherEndpointPlaceholder}
+                      spellCheck={false}
+                      onChange={(event) => setFetcherEndpoint(event.target.value)}
+                    />
+                  </label>
+                  <label>
+                    <span>{t.fetcherTokenLabel}</span>
+                    <input
+                      value={fetcherToken}
+                      placeholder={t.fetcherTokenPlaceholder}
+                      spellCheck={false}
+                      type="password"
+                      onChange={(event) => setFetcherToken(event.target.value)}
+                    />
+                  </label>
+                </>
+              )}
             </div>
           </section>
 
@@ -816,16 +880,32 @@ function isHttpSubscriptionInput(value: string) {
 
 async function loadSubscriptionContent(
   sourceUrl: string,
-  options: { endpoint: string; token: string; mode: 'direct' | 'service' | 'auto' },
+  options: { endpoint: string; sameOriginAvailable: boolean; token: string; mode: FetchMode },
 ) {
+  if (options.mode === 'hosted') {
+    return fetchSameOriginSubscription(sourceUrl)
+  }
+
   if (options.mode === 'service') {
     return fetchViaSubscriptionService(sourceUrl, options)
+  }
+
+  if (options.mode === 'direct') {
+    return fetchDirectSubscription(sourceUrl)
+  }
+
+  if (options.sameOriginAvailable) {
+    try {
+      return await fetchSameOriginSubscription(sourceUrl)
+    } catch {
+      // 同源 Worker 可用但拉取失败时，继续尝试浏览器直连和用户填写的外部服务，给临时故障留一条退路。
+    }
   }
 
   try {
     return await fetchDirectSubscription(sourceUrl)
   } catch (directError) {
-    if (options.mode !== 'auto' || !options.endpoint) {
+    if (!options.endpoint || !options.token) {
       throw directError
     }
     return fetchViaSubscriptionService(sourceUrl, options)
@@ -839,6 +919,26 @@ async function fetchDirectSubscription(sourceUrl: string) {
     throw new Error(`HTTP ${response.status}`)
   }
   return response.text()
+}
+
+async function fetchSameOriginSubscription(sourceUrl: string) {
+  // Cloudflare Worker 托管模式下，真实订阅拉取发生在同源 /api 后端；
+  // 浏览器不需要携带 Worker 地址或 token，自然也不会把这些凭据暴露给用户。
+  const response = await fetch('/api/fetch-subscription', {
+    method: 'POST',
+    cache: 'no-store',
+    credentials: 'same-origin',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ url: sourceUrl }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`same-origin fetcher HTTP ${response.status}`)
+  }
+
+  return readFetcherContent(response)
 }
 
 async function fetchViaSubscriptionService(
@@ -863,6 +963,10 @@ async function fetchViaSubscriptionService(
     throw new Error(`fetcher HTTP ${response.status}`)
   }
 
+  return readFetcherContent(response)
+}
+
+async function readFetcherContent(response: Response) {
   const payload = await response.json() as { content?: unknown }
   if (typeof payload.content !== 'string') {
     throw new Error('fetcher response missing content')

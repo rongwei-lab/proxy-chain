@@ -1,9 +1,8 @@
 name = "proxy-chain-subscription-fetcher"
 main = "subscription-fetcher-worker.js"
 compatibility_date = "2026-06-21"
+workers_dev = false
 
 [vars]
-ALLOWED_ORIGINS = "https://rongwei-lab.github.io,http://127.0.0.1:5173"
-ALLOWED_SUBSCRIPTION_HOSTS = "update.example.com"
 FETCH_TIMEOUT_MS = "12000"
 MAX_RESPONSE_BYTES = "2097152"

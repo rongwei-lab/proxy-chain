@@ -212,16 +212,58 @@
   font-weight: 760;
 }
 
+.fetcher-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .fetcher-heading p {
   max-width: 78ch;
 }
 
+.fetcher-status {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid #dbe4f0;
+  border-radius: 7px;
+  color: #526174;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 720;
+  white-space: nowrap;
+}
+
+.fetcher-status.available {
+  color: #05603a;
+  border-color: #b7e4ce;
+  background: #effcf5;
+}
+
+.fetcher-status.unavailable {
+  color: #915930;
+  border-color: #f3d0aa;
+  background: #fff7ed;
+}
+
 .fetcher-controls {
   display: grid;
-  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr) minmax(0, 260px);
   gap: 10px;
   align-items: end;
   margin-top: 12px;
+}
+
+.fetcher-controls.with-external {
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr) minmax(0, 240px);
+}
+
+.fetcher-controls.managed-only {
+  grid-template-columns: minmax(260px, 320px);
 }
 
 .fetcher-controls label {
@@ -257,7 +299,7 @@
 }
 
 .fetcher-mode {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .fetcher-mode button {

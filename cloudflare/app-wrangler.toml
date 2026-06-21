@@ -1,0 +1,13 @@
+name = "proxy-chain-app"
+main = "app-worker.js"
+compatibility_date = "2026-06-21"
+
+[assets]
+directory = "../dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+[[services]]
+binding = "SUBSCRIPTION_FETCHER"
+service = "proxy-chain-subscription-fetcher"
