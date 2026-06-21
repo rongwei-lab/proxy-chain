@@ -58,6 +58,8 @@ npm run test
 npm run build
 npm run preview
 npm run fetcher
+npm run cf:dev
+npm run cf:deploy
 ```
 
 `npm run preview` 用于本地预览生产构建结果。因为 GitHub Pages 部署路径是 `/proxy-chain/`，Vite 已在 `vite.config.ts` 中配置 `base: '/proxy-chain/'`。
@@ -83,7 +85,75 @@ https://<owner>.github.io/proxy-chain/
 
 GitHub Pages 是静态站点，页面直接请求订阅地址时经常会被浏览器 CORS 策略拦截。解决办法是在自己的服务器上部署 `server/subscription-fetcher.mjs`，由服务器读取订阅内容，再返回给页面。
 
-### 运行方式
+推荐部署方式：
+
+- Cloudflare Workers：不需要维护 VPS，适合轻量订阅拉取。
+- VPS/Node：适合已经有服务器、Nginx、systemd 的场景。
+
+### Cloudflare Workers 部署
+
+Worker 文件位于 `cloudflare/subscription-fetcher-worker.js`，配置文件位于 `cloudflare/wrangler.toml`。
+
+1. 登录 Cloudflare：
+
+```bash
+npx wrangler login
+```
+
+2. 修改 `cloudflare/wrangler.toml`：
+
+```toml
+name = "proxy-chain-subscription-fetcher"
+
+[vars]
+ALLOWED_ORIGINS = "https://rongwei-lab.github.io,http://127.0.0.1:5173"
+ALLOWED_SUBSCRIPTION_HOSTS = "update.example.com"
+FETCH_TIMEOUT_MS = "12000"
+MAX_RESPONSE_BYTES = "2097152"
+```
+
+字段说明：
+
+- `ALLOWED_ORIGINS`：允许调用 Worker 的网页来源。线上 GitHub Pages 通常是 `https://rongwei-lab.github.io`。
+- `ALLOWED_SUBSCRIPTION_HOSTS`：允许 Worker 拉取的订阅域名，多个域名用英文逗号分隔。
+- `FETCH_TIMEOUT_MS`：拉取超时时间。
+- `MAX_RESPONSE_BYTES`：最大订阅响应体，默认 2MB。
+
+3. 设置访问令牌。不要把真实令牌写进 `wrangler.toml`：
+
+```bash
+npx wrangler secret put FETCH_TOKEN --config cloudflare/wrangler.toml
+```
+
+4. 部署：
+
+```bash
+npm run cf:deploy
+```
+
+部署完成后，Wrangler 会输出类似这样的 Worker 地址：
+
+```text
+https://proxy-chain-subscription-fetcher.<你的账号>.workers.dev
+```
+
+页面里填写：
+
+- 服务地址：`https://proxy-chain-subscription-fetcher.<你的账号>.workers.dev/fetch-subscription`
+- 访问令牌：第 3 步设置的 `FETCH_TOKEN`
+- 模式：建议选择“自动”
+
+本地开发 Worker：
+
+```bash
+cp cloudflare/.dev.vars.example cloudflare/.dev.vars
+# 编辑 cloudflare/.dev.vars，写入本地测试 FETCH_TOKEN
+npm run cf:dev
+```
+
+Cloudflare Worker 版本同样会校验来源、访问令牌、订阅域名白名单，并拦截常见 localhost/内网 IP 字面地址。不要把 Worker 配成允许任意订阅域名，否则会变成公开拉取器。
+
+### VPS/Node 运行方式
 
 复制示例环境变量：
 
