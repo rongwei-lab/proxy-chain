@@ -396,6 +396,17 @@
   font-size: 13px;
 }
 
+.subscription-hint {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 7px;
+  color: #1554a4;
+  background: #eff6ff;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .fetch-message {
   margin-top: 12px;
   padding: 10px 12px;

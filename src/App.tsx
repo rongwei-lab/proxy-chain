@@ -34,11 +34,11 @@ const copyText = {
     localOnly: '仅本地处理',
     noUpload: '不上传',
     inputTitle: '输入',
-    inputDescription: '入口和出口分开粘贴，避免订阅节点与出口节点混在一起。',
+    inputDescription: '入口和出口分开粘贴；订阅地址需要先拉取成完整配置内容，再从候选里选择节点。',
     entryInputTitle: '入口输入',
-    entryInputDescription: '可粘贴 VLESS、SOCKS5、Hysteria2、Shadowsocks/SS 链接，入口订阅地址，或配置片段。',
+    entryInputDescription: '可直接粘贴拉取后的 Mihomo/Clash YAML 配置全文，也可粘贴入口订阅地址后点击拉取订阅。',
     exitInputTitle: '出口输入',
-    exitInputDescription: '可粘贴 VLESS、SOCKS5、Hysteria2、Shadowsocks/SS 链接，出口订阅地址，或配置片段。',
+    exitInputDescription: '可直接粘贴 VLESS、SOCKS5、Hysteria2、Shadowsocks/SS、YAML 节点，也可粘贴出口订阅地址后点击拉取订阅。',
     examples: '示例',
     editorLabel: '内容',
     lines: '行',
@@ -48,6 +48,7 @@ const copyText = {
     fetchSuccess: '订阅内容已加载，已在本地解析。',
     fetchUnsupported: '请输入 http(s) 订阅地址后再拉取。',
     fetchFailed: '订阅拉取失败：可能被跨域策略、网络或订阅服务限制拦截。可以在浏览器打开订阅后复制配置内容粘贴。',
+    subscriptionUrlHint: '检测到订阅地址。请点击“拉取订阅”；成功后输入框会替换为完整 Mihomo/Clash 配置内容并自动解析。也可以在浏览器打开订阅后复制完整配置粘贴。',
     parsedPrefix: '已解析',
     parsedSuffix: '个候选',
     chainTitle: '链式代理',
@@ -89,11 +90,11 @@ const copyText = {
     localOnly: 'Local only',
     noUpload: 'No upload',
     inputTitle: 'Input',
-    inputDescription: 'Paste entry and exit separately so subscription nodes never mix with exit nodes.',
+    inputDescription: 'Paste entry and exit separately. Fetch subscription URLs into full config content before selecting nodes.',
     entryInputTitle: 'Entry input',
-    entryInputDescription: 'Paste VLESS, SOCKS5, Hysteria2, Shadowsocks/SS links, an entry subscription URL, or YAML node content.',
+    entryInputDescription: 'Paste fetched Mihomo/Clash YAML content directly, or paste an entry subscription URL and click Fetch subscription.',
     exitInputTitle: 'Exit input',
-    exitInputDescription: 'Paste VLESS, SOCKS5, Hysteria2, Shadowsocks/SS links, an exit subscription URL, or YAML node content.',
+    exitInputDescription: 'Paste VLESS, SOCKS5, Hysteria2, Shadowsocks/SS, YAML nodes, or an exit subscription URL and click Fetch subscription.',
     examples: 'Example',
     editorLabel: 'Content',
     lines: 'lines',
@@ -103,6 +104,7 @@ const copyText = {
     fetchSuccess: 'Subscription content loaded and parsed locally.',
     fetchUnsupported: 'Enter an http(s) subscription URL before fetching.',
     fetchFailed: 'Failed to fetch subscription. It may be blocked by CORS, network, or provider policy. Open it in your browser and paste the YAML content instead.',
+    subscriptionUrlHint: 'Subscription URL detected. Click “Fetch subscription”; after success the input will be replaced with full Mihomo/Clash config content and parsed automatically. You can also open the URL in your browser and paste the full config here.',
     parsedPrefix: 'Parsed',
     parsedSuffix: 'candidates',
     chainTitle: 'Chain',
@@ -206,6 +208,8 @@ function App() {
     outputMode === 'clash' ? 'config.yaml' : outputMode === 'xray' ? 'config.json' : 'import-links.txt'
   const chainLabel =
     selectedEntry && selectedExit ? `${selectedEntry.name} ${t.chainArrow} ${selectedExit.name}` : t.waitingChain
+  const entryIsSubscriptionUrl = isHttpSubscriptionInput(entryInput)
+  const exitIsSubscriptionUrl = isHttpSubscriptionInput(exitInput)
 
   function setInputValue(slot: FetchSlot, value: string) {
     if (slot === 'entry') {
@@ -339,7 +343,12 @@ function App() {
               parsedCount={entryCandidates.length}
               fetchState={fetchState.entry}
               fetchMessages={t}
-              warnings={entryInput.trim() ? entryParsed.warnings : []}
+              subscriptionHint={
+                entryIsSubscriptionUrl && fetchState.entry !== 'loading' && fetchState.entry !== 'success'
+                  ? t.subscriptionUrlHint
+                  : undefined
+              }
+              warnings={entryInput.trim() && !entryIsSubscriptionUrl ? entryParsed.warnings : []}
               onChange={(value) => setInputValue('entry', value)}
               onExample={() => loadExample('entry')}
               onClear={() => setInputValue('entry', '')}
@@ -362,7 +371,12 @@ function App() {
               parsedCount={exitCandidates.length}
               fetchState={fetchState.exit}
               fetchMessages={t}
-              warnings={exitInput.trim() ? exitParsed.warnings : []}
+              subscriptionHint={
+                exitIsSubscriptionUrl && fetchState.exit !== 'loading' && fetchState.exit !== 'success'
+                  ? t.subscriptionUrlHint
+                  : undefined
+              }
+              warnings={exitInput.trim() && !exitIsSubscriptionUrl ? exitParsed.warnings : []}
               onChange={(value) => setInputValue('exit', value)}
               onExample={() => loadExample('exit')}
               onClear={() => setInputValue('exit', '')}
@@ -474,6 +488,7 @@ interface ProxyInputCardProps {
   parsedCount: number
   fetchState: FetchState
   fetchMessages: Record<string, string>
+  subscriptionHint?: string
   warnings: string[]
   onChange: (value: string) => void
   onExample: () => void
@@ -497,6 +512,7 @@ function ProxyInputCard({
   parsedCount,
   fetchState,
   fetchMessages,
+  subscriptionHint,
   warnings,
   onChange,
   onExample,
@@ -551,6 +567,7 @@ function ProxyInputCard({
         </div>
       </div>
 
+      {subscriptionHint && <div className="subscription-hint">{subscriptionHint}</div>}
       {warnings.length > 0 && (
         <div className="warnings">
           {warnings.slice(0, 2).map((warning) => (
@@ -612,6 +629,14 @@ function StatusChip({ ok, label, detail }: { ok: boolean; label: string; detail:
 
 function pickNode(nodes: NormalizedProxyNode[], selectedId: string) {
   return nodes.find((node) => node.id === selectedId) ?? nodes[0]
+}
+
+function isHttpSubscriptionInput(value: string) {
+  const text = value.trim()
+
+  // 这里仅识别“输入框里只有一个 http(s) 地址”的场景。
+  // 如果用户粘贴的是完整 YAML，里面可能包含 URL 字段，不能误判为订阅地址。
+  return /^https?:\/\/\S+$/i.test(text)
 }
 
 function isValidJsonOutput(outputMode: OutputMode, generated: string) {
