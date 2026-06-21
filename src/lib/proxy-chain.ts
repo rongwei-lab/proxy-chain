@@ -96,13 +96,23 @@ export function parseProxyInput(input: string): ParseResult {
       continue
     }
 
+    if (chunk.startsWith('hysteria2://') || chunk.startsWith('hy2://')) {
+      const parsed = parseHysteria2Link(chunk)
+      if (parsed) {
+        nodes.push(parsed)
+      } else {
+        warnings.push('发现 Hysteria2 链接，但链接格式不完整。')
+      }
+      continue
+    }
+
     const yamlNodes = parseYamlProxies(chunk)
     if (yamlNodes.length > 0) {
       nodes.push(...yamlNodes)
       continue
     }
 
-    warnings.push('有一段输入未能识别为 VLESS、SOCKS5 或受支持的 YAML 节点。')
+    warnings.push('有一段输入未能识别为 VLESS、SOCKS5、Hysteria2 或受支持的 YAML 节点。')
   }
 
   return { nodes: dedupeNodes(nodes), warnings }
@@ -164,6 +174,37 @@ export function parseSocks5Link(link: string): Socks5ProxyNode | undefined {
       port,
       username: username || undefined,
       password: password || undefined,
+      raw: link,
+    }
+  } catch {
+    return undefined
+  }
+}
+
+export function parseHysteria2Link(link: string): Hysteria2ProxyNode | undefined {
+  try {
+    const url = new URL(link)
+    const server = url.hostname
+    const port = parsePort(url.port)
+
+    if (!server || port === undefined) {
+      return undefined
+    }
+
+    const params = url.searchParams
+    const password = decodeURIComponent(url.username || url.password)
+    const name = decodeName(url.hash, `${server}:${port}`)
+
+    return {
+      id: stableNodeId('hysteria2', name, server, port, password),
+      type: 'hysteria2',
+      name,
+      server,
+      port,
+      password: password || optionalParam(params, 'password'),
+      sni: optionalParam(params, 'sni') ?? optionalParam(params, 'servername'),
+      skipCertVerify: optionalBooleanParam(params, 'insecure') ?? optionalBooleanParam(params, 'skip-cert-verify'),
+      udp: optionalBooleanParam(params, 'udp'),
       raw: link,
     }
   } catch {
@@ -285,12 +326,21 @@ function splitInput(text: string): string[] {
     .map((line) => line.trim())
     .filter(Boolean)
 
-  const linkOnly = lines.every((line) => line.startsWith('vless://') || line.startsWith('socks5://'))
+  const linkOnly = lines.every((line) => isSupportedProxyLink(line))
   if (linkOnly) {
     return lines
   }
 
   return [text]
+}
+
+function isSupportedProxyLink(line: string): boolean {
+  return (
+    line.startsWith('vless://') ||
+    line.startsWith('socks5://') ||
+    line.startsWith('hysteria2://') ||
+    line.startsWith('hy2://')
+  )
 }
 
 function decodeName(hash: string, fallback: string): string {
@@ -305,6 +355,22 @@ function decodeName(hash: string, fallback: string): string {
 function optionalParam(params: URLSearchParams, key: string): string | undefined {
   const value = params.get(key)
   return value && value.trim() ? value : undefined
+}
+
+function optionalBooleanParam(params: URLSearchParams, key: string): boolean | undefined {
+  const value = optionalParam(params, key)
+  if (!value) {
+    return undefined
+  }
+
+  if (/^(1|true|yes)$/i.test(value)) {
+    return true
+  }
+  if (/^(0|false|no)$/i.test(value)) {
+    return false
+  }
+
+  return undefined
 }
 
 function parsePort(value: string | number | undefined): number | undefined {

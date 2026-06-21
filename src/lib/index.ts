@@ -13,6 +13,7 @@ export {
   generateClashYaml,
   generateImportLinks,
   generateXrayJson,
+  parseHysteria2Link,
   parseProxyInput,
   parseSocks5Link,
   parseVlessLink,

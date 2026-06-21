@@ -3,6 +3,7 @@ import {
   generateClashYaml,
   generateImportLinks,
   generateXrayJson,
+  parseHysteria2Link,
   parseProxyInput,
   parseSocks5Link,
   parseVlessLink,
@@ -41,6 +42,21 @@ describe('proxy-chain parsing', () => {
       server: 'socks.example.com',
       port: 1080,
       name: 'Local SOCKS',
+    })
+  })
+
+  it('解析 Hysteria2 链接', () => {
+    const node = parseHysteria2Link('hysteria2://hy2-pass@hy2.example.com:8443?sni=edge.example.com&insecure=1&udp=false#HY2%20Link')
+
+    expect(node).toMatchObject({
+      type: 'hysteria2',
+      password: 'hy2-pass',
+      server: 'hy2.example.com',
+      port: 8443,
+      sni: 'edge.example.com',
+      skipCertVerify: true,
+      udp: false,
+      name: 'HY2 Link',
     })
   })
 
@@ -132,6 +148,23 @@ describe('proxy-chain generation', () => {
     }
 
     expect(config.outbounds[0].proxySettings?.tag).toBe('VLESS-Reality')
+  })
+
+  it('入口和出口都支持不同节点类型组合', () => {
+    const entry = parseSocks5Link('socks5://user:pass@entry.example.com:1080#Entry%20SOCKS')
+    const exit = parseVlessLink(vlessLink)
+    expect(entry).toBeDefined()
+    expect(exit).toBeDefined()
+
+    const yaml = generateClashYaml(entry!, exit!)
+    const config = JSON.parse(generateXrayJson(entry!, exit!)) as {
+      outbounds: Array<{ protocol: string; proxySettings?: { tag: string } }>
+    }
+
+    expect(yaml).toContain('name: "Entry SOCKS"')
+    expect(yaml).toContain('dialer-proxy: 入口节点')
+    expect(config.outbounds[0].protocol).toBe('vless')
+    expect(config.outbounds[0].proxySettings?.tag).toBe('Entry-SOCKS')
   })
 
   it('生成 import links 文本', () => {

@@ -24,22 +24,21 @@ type Language = 'zh' | 'en'
 type FetchSlot = 'entry' | 'exit'
 type FetchState = 'idle' | 'loading' | 'success' | 'failed' | 'unsupported'
 
-const outputModes: Array<{ id: OutputMode; label: string }> = [
-  { id: 'clash', label: 'Clash Verge' },
-  { id: 'xray', label: 'v2rayN JSON' },
-  { id: 'links', label: 'Import links' },
-]
+const outputModes: OutputMode[] = ['clash', 'xray', 'links']
 
 const copyText = {
   zh: {
+    appName: '链式代理实验室',
     subtitle: '本地优先的链式代理配置生成器',
     privacyLabel: '隐私状态',
+    localOnly: '仅本地处理',
+    noUpload: '不上传',
     inputTitle: '输入',
     inputDescription: '入口和出口分开粘贴，避免订阅节点与出口节点混在一起。',
     entryInputTitle: '入口输入',
-    entryInputDescription: '粘贴 VLESS Reality 链接、入口订阅 URL，或 Mihomo/Clash 订阅 YAML。',
+    entryInputDescription: '可粘贴 VLESS、SOCKS5、Hysteria2 链接，入口订阅地址，或配置片段。',
     exitInputTitle: '出口输入',
-    exitInputDescription: '粘贴 SOCKS5 链接、Hysteria2 节点片段，或包含出口节点的 YAML。',
+    exitInputDescription: '可粘贴 VLESS、SOCKS5、Hysteria2 链接，出口订阅地址，或配置片段。',
     examples: '示例',
     editorLabel: '内容',
     lines: '行',
@@ -48,15 +47,15 @@ const copyText = {
     fetchingSubscription: '拉取中...',
     fetchSuccess: '订阅内容已加载，已在本地解析。',
     fetchUnsupported: '请输入 http(s) 订阅地址后再拉取。',
-    fetchFailed: '订阅拉取失败：可能被 CORS、网络或订阅服务限制拦截。可以在浏览器打开订阅后复制 YAML 内容粘贴。',
+    fetchFailed: '订阅拉取失败：可能被跨域策略、网络或订阅服务限制拦截。可以在浏览器打开订阅后复制配置内容粘贴。',
     parsedPrefix: '已解析',
     parsedSuffix: '个候选',
     chainTitle: '链式代理',
-    chainDescription: '链路会按“入口 -> 出口”生成；Clash 使用 dialer-proxy，v2rayN/Xray 使用 proxySettings。',
+    chainDescription: '链路会按“入口 → 出口”生成；配置字段会自动使用对应客户端的链式写法。',
     entry: '入口',
     exit: '出口',
-    missingEntry: '未找到 VLESS 入口',
-    missingExit: '未找到 SOCKS5/HY2 出口',
+    missingEntry: '未找到可用入口节点',
+    missingExit: '未找到可用出口节点',
     outputTitle: '输出',
     outputDescription: '生成内容只在当前浏览器会话中存在。',
     copy: '复制',
@@ -64,26 +63,37 @@ const copyText = {
     failed: '失败',
     download: '下载',
     outputType: '输出类型',
+    outputModeClash: 'Clash 配置',
+    outputModeXray: 'v2rayN 配置',
+    outputModeLinks: '导入链接',
     preview: '预览',
     noOutput: '无输出',
     emptyOutput: '分别填写入口和出口后，这里会生成链式代理配置。',
-    yamlDetail: 'dialer-proxy',
-    jsonDetail: 'proxySettings',
+    yamlStatus: '配置就绪',
+    jsonStatus: '链路就绪',
+    yamlDetail: '链式字段',
+    jsonDetail: '链式字段',
     noUploadDetail: '浏览器本地',
     nodes: '候选',
     chain: '链路',
     waitingChain: '等待选择入口和出口',
     languageLabel: '语言',
+    zhLanguage: '中文',
+    enLanguage: '英文',
+    chainArrow: '→',
   },
   en: {
+    appName: 'Proxy Chain Lab',
     subtitle: 'Local-first chained proxy config generator',
     privacyLabel: 'Privacy status',
+    localOnly: 'Local only',
+    noUpload: 'No upload',
     inputTitle: 'Input',
     inputDescription: 'Paste entry and exit separately so subscription nodes never mix with exit nodes.',
     entryInputTitle: 'Entry input',
-    entryInputDescription: 'Paste a VLESS Reality link, entry subscription URL, or Mihomo/Clash subscription YAML.',
+    entryInputDescription: 'Paste VLESS, SOCKS5, Hysteria2 links, an entry subscription URL, or YAML node content.',
     exitInputTitle: 'Exit input',
-    exitInputDescription: 'Paste a SOCKS5 link, Hysteria2 snippet, or YAML containing exit nodes.',
+    exitInputDescription: 'Paste VLESS, SOCKS5, Hysteria2 links, an exit subscription URL, or YAML node content.',
     examples: 'Example',
     editorLabel: 'Content',
     lines: 'lines',
@@ -96,11 +106,11 @@ const copyText = {
     parsedPrefix: 'Parsed',
     parsedSuffix: 'candidates',
     chainTitle: 'Chain',
-    chainDescription: 'The generated chain follows entry -> exit. Clash uses dialer-proxy; v2rayN/Xray uses proxySettings.',
+    chainDescription: 'The generated chain follows entry → exit and uses each client’s native chaining field.',
     entry: 'Entry',
     exit: 'Exit',
-    missingEntry: 'No VLESS entry found',
-    missingExit: 'No SOCKS5/HY2 exit found',
+    missingEntry: 'No supported entry node found',
+    missingExit: 'No supported exit node found',
     outputTitle: 'Output',
     outputDescription: 'Generated content stays in this browser session.',
     copy: 'Copy',
@@ -108,29 +118,44 @@ const copyText = {
     failed: 'Failed',
     download: 'Download',
     outputType: 'Output type',
+    outputModeClash: 'Clash Verge config',
+    outputModeXray: 'v2rayN JSON config',
+    outputModeLinks: 'Import links',
     preview: 'Preview',
     noOutput: 'No output',
     emptyOutput: 'Fill entry and exit inputs to generate chained proxy config.',
-    yamlDetail: 'dialer-proxy',
-    jsonDetail: 'proxySettings',
+    yamlStatus: 'YAML OK',
+    jsonStatus: 'JSON OK',
+    yamlDetail: 'chain field',
+    jsonDetail: 'chain field',
     noUploadDetail: 'browser local',
     nodes: 'Candidates',
     chain: 'Chain',
     waitingChain: 'Waiting for entry and exit',
     languageLabel: 'Language',
+    zhLanguage: 'Chinese',
+    enLanguage: 'English',
+    chainArrow: '→',
   },
 } satisfies Record<Language, Record<string, string>>
 
-const entryExample =
-  'vless://11111111-1111-4111-8111-111111111111@203.0.113.10:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.example.com&fp=chrome&pbk=********&type=tcp&headerType=none#入口-VLESS'
+const entryExample = [
+  'vless://11111111-1111-4111-8111-111111111111@203.0.113.10:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.example.com&fp=chrome&pbk=********&type=tcp&headerType=none#入口-VLESS',
+  'socks5://demo:********@203.0.113.20:1080#入口-SOCKS5',
+  'hysteria2://demo-pass@203.0.113.30:8443?sni=www.example.com&insecure=1#入口-HY2',
+].join('\n')
 
-const exitExample = 'socks5://demo:********@198.51.100.14:1193#出口-SOCKS5'
+const exitExample = [
+  'socks5://demo:********@198.51.100.14:1193#出口-SOCKS5',
+  'hysteria2://demo-pass@198.51.100.24:8443?sni=www.example.com&insecure=1#出口-HY2',
+  'vless://22222222-2222-4222-8222-222222222222@198.51.100.34:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.example.org&fp=chrome&pbk=********&type=tcp&headerType=none#出口-VLESS',
+].join('\n')
 
 function App() {
   const [language, setLanguage] = useState<Language>('zh')
   const [outputMode, setOutputMode] = useState<OutputMode>('clash')
-  const [entryInput, setEntryInput] = useState(entryExample)
-  const [exitInput, setExitInput] = useState(exitExample)
+  const [entryInput, setEntryInput] = useState('')
+  const [exitInput, setExitInput] = useState('')
   const [entryId, setEntryId] = useState('')
   const [exitId, setExitId] = useState('')
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
@@ -139,17 +164,16 @@ function App() {
     exit: 'idle',
   })
   const t = copyText[language]
+  const outputModeLabels: Record<OutputMode, string> = {
+    clash: t.outputModeClash,
+    xray: t.outputModeXray,
+    links: t.outputModeLinks,
+  }
 
   const entryParsed = useMemo(() => parseProxyInput(entryInput), [entryInput])
   const exitParsed = useMemo(() => parseProxyInput(exitInput), [exitInput])
-  const entryCandidates = useMemo(
-    () => entryParsed.nodes.filter((node) => node.type === 'vless'),
-    [entryParsed.nodes],
-  )
-  const exitCandidates = useMemo(
-    () => exitParsed.nodes.filter((node) => node.type === 'socks5' || node.type === 'hysteria2'),
-    [exitParsed.nodes],
-  )
+  const entryCandidates = entryParsed.nodes
+  const exitCandidates = exitParsed.nodes
   const allNodes = useMemo(
     () => [...entryParsed.nodes, ...exitParsed.nodes],
     [entryParsed.nodes, exitParsed.nodes],
@@ -179,7 +203,7 @@ function App() {
   const outputFileName =
     outputMode === 'clash' ? 'config.yaml' : outputMode === 'xray' ? 'config.json' : 'import-links.txt'
   const chainLabel =
-    selectedEntry && selectedExit ? `${selectedEntry.name} -> ${selectedExit.name}` : t.waitingChain
+    selectedEntry && selectedExit ? `${selectedEntry.name} ${t.chainArrow} ${selectedExit.name}` : t.waitingChain
 
   function setInputValue(slot: FetchSlot, value: string) {
     if (slot === 'entry') {
@@ -253,7 +277,7 @@ function App() {
             <ShieldCheck size={24} />
           </div>
           <div>
-            <h1>Proxy Chain Lab</h1>
+            <h1>{t.appName}</h1>
             <p>{t.subtitle}</p>
           </div>
         </div>
@@ -264,24 +288,24 @@ function App() {
               className={language === 'zh' ? 'active' : ''}
               onClick={() => setLanguage('zh')}
             >
-              中文
+              {t.zhLanguage}
             </button>
             <button
               type="button"
               className={language === 'en' ? 'active' : ''}
               onClick={() => setLanguage('en')}
             >
-              English
+              {t.enLanguage}
             </button>
           </div>
           <div className="privacy-strip" aria-label={t.privacyLabel}>
             <span>
               <LockKeyhole size={15} />
-              Local only
+              {t.localOnly}
             </span>
             <span>
               <CheckCircle2 size={15} />
-              No upload
+              {t.noUpload}
             </span>
           </div>
         </div>
@@ -360,7 +384,7 @@ function App() {
                 emptyText={t.missingEntry}
                 onChange={setEntryId}
               />
-              <div className="chain-arrow">{'->'}</div>
+              <div className="chain-arrow">{t.chainArrow}</div>
               <NodeSelect
                 label={t.exit}
                 nodes={exitCandidates}
@@ -393,12 +417,12 @@ function App() {
           <div className="segmented-control output-tabs" role="tablist" aria-label={t.outputType}>
             {outputModes.map((mode) => (
               <button
-                key={mode.id}
-                className={outputMode === mode.id ? 'active' : ''}
+                key={mode}
+                className={outputMode === mode ? 'active' : ''}
                 type="button"
-                onClick={() => setOutputMode(mode.id)}
+                onClick={() => setOutputMode(mode)}
               >
-                {mode.label}
+                {outputModeLabels[mode]}
               </button>
             ))}
           </div>
@@ -416,9 +440,9 @@ function App() {
       </section>
 
       <footer className="status-bar">
-        <StatusChip ok={generated.includes('dialer-proxy') || outputMode !== 'clash'} label="YAML OK" detail={t.yamlDetail} />
-        <StatusChip ok={isValidJsonOutput(outputMode, generated)} label="JSON OK" detail={t.jsonDetail} />
-        <StatusChip ok label="No upload" detail={t.noUploadDetail} />
+        <StatusChip ok={generated.includes('dialer-proxy') || outputMode !== 'clash'} label={t.yamlStatus} detail={t.yamlDetail} />
+        <StatusChip ok={isValidJsonOutput(outputMode, generated)} label={t.jsonStatus} detail={t.jsonDetail} />
+        <StatusChip ok label={t.noUpload} detail={t.noUploadDetail} />
         <div className="status-summary">
           <span>
             {t.nodes}: {entryCandidates.length + exitCandidates.length}
