@@ -2,6 +2,10 @@
 
 proxy-chain 是一个运行在浏览器本地的链式代理配置辅助工具。它面向需要整理、拼接或转换代理节点配置的用户，目标是把输入的代理信息在前端完成解析和导出，方便后续导入到真实客户端中使用。
 
+## 在线测试地址
+
+- Cloudflare Workers 测试地址：[https://proxy-chain-app.rongweji.workers.dev](https://proxy-chain-app.rongweji.workers.dev)
+
 ## 项目定位
 
 - 本项目只负责生成和展示代理配置文本，不提供代理服务器或中转节点。
