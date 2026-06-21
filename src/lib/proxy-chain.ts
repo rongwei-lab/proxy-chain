@@ -244,8 +244,7 @@ export function generateClashYaml(
   exitNode: NormalizedProxyNode,
   options: ChainConfigOptions = {},
 ): string {
-  const entryName = options.entryNodeName ?? entryNode.name
-  const exitName = options.exitNodeName ?? exitNode.name
+  const { entryName, exitName } = resolveChainNames(entryNode, exitNode, options)
   const entryGroupName = '入口节点'
   const entryProxy = toClashProxy(entryNode, entryName)
   const exitProxy = {
@@ -290,8 +289,7 @@ export function generateXrayJson(
   exitNode: NormalizedProxyNode,
   options: ChainConfigOptions = {},
 ): string {
-  const entryTag = safeTag(options.entryNodeName ?? entryNode.name, 'entry')
-  const exitTag = safeTag(options.exitNodeName ?? exitNode.name, 'exit')
+  const { entryTag, exitTag } = resolveChainTags(entryNode, exitNode, options)
   const config = {
     log: { loglevel: 'warning' },
     inbounds: [
@@ -860,6 +858,61 @@ function safeTag(name: string, fallback: string): string {
     .replace(/[^\w.-]+/g, '-')
     .replace(/^-+|-+$/g, '')
   return tag || fallback
+}
+
+function resolveChainNames(
+  entryNode: NormalizedProxyNode,
+  exitNode: NormalizedProxyNode,
+  options: ChainConfigOptions,
+): { entryName: string; exitName: string } {
+  const requestedEntryName = options.entryNodeName ?? entryNode.name
+  const requestedExitName = options.exitNodeName ?? exitNode.name
+  const entryName = makeUniqueProxyName(requestedEntryName, '入口')
+  const exitName = makeUniqueProxyName(requestedExitName, '出口', new Set([entryName]))
+
+  return { entryName, exitName }
+}
+
+function resolveChainTags(
+  entryNode: NormalizedProxyNode,
+  exitNode: NormalizedProxyNode,
+  options: ChainConfigOptions,
+): { entryTag: string; exitTag: string } {
+  const requestedEntryName = options.entryNodeName ?? entryNode.name
+  const requestedExitName = options.exitNodeName ?? exitNode.name
+  const entryTag = makeUniqueProxyTag(requestedEntryName, 'entry')
+  const exitTag = makeUniqueProxyTag(requestedExitName, 'exit', new Set([entryTag]))
+
+  return { entryTag, exitTag }
+}
+
+function makeUniqueProxyName(baseName: string, role: '入口' | '出口', usedNames = new Set<string>()): string {
+  const readableBaseName = baseName.trim() || role
+  let candidate = `${readableBaseName}-${role}`
+  let index = 2
+
+  // Clash/Mihomo 在 proxies 列表里要求 name 全局唯一；订阅节点常有同名情况，
+  // 因此导出链式配置时主动加角色后缀，避免 Clash Verge 校验报 duplicate name。
+  while (usedNames.has(candidate)) {
+    candidate = `${readableBaseName}-${role}-${index}`
+    index += 1
+  }
+
+  return candidate
+}
+
+function makeUniqueProxyTag(baseName: string, role: 'entry' | 'exit', usedTags = new Set<string>()): string {
+  const readableBaseTag = safeTag(baseName, role)
+  let candidate = `${readableBaseTag}-${role}`
+  let index = 2
+
+  // Xray outbound tag 也需要全局唯一；使用英文角色后缀，避免中文后缀在 safeTag 中被清理。
+  while (usedTags.has(candidate)) {
+    candidate = `${readableBaseTag}-${role}-${index}`
+    index += 1
+  }
+
+  return candidate
 }
 
 function dedupeNodes(nodes: NormalizedProxyNode[]): NormalizedProxyNode[] {

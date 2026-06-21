@@ -147,7 +147,7 @@ describe('proxy-chain generation', () => {
       outbounds: Array<{ tag: string; proxySettings?: { tag: string } }>
     }
 
-    expect(config.outbounds[0].proxySettings?.tag).toBe('VLESS-Reality')
+    expect(config.outbounds[0].proxySettings?.tag).toBe('VLESS-Reality-entry')
   })
 
   it('入口和出口都支持不同节点类型组合', () => {
@@ -161,10 +161,27 @@ describe('proxy-chain generation', () => {
       outbounds: Array<{ protocol: string; proxySettings?: { tag: string } }>
     }
 
-    expect(yaml).toContain('name: "Entry SOCKS"')
+    expect(yaml).toContain('name: "Entry SOCKS-入口"')
     expect(yaml).toContain('dialer-proxy: 入口节点')
     expect(config.outbounds[0].protocol).toBe('vless')
-    expect(config.outbounds[0].proxySettings?.tag).toBe('Entry-SOCKS')
+    expect(config.outbounds[0].proxySettings?.tag).toBe('Entry-SOCKS-entry')
+  })
+
+  it('Clash/Mihomo 导出时自动避让入口和出口同名节点', () => {
+    const entry = parseVlessLink(
+      'vless://11111111-1111-4111-8111-111111111111@entry.example.com:443?flow=xtls-rprx-vision&sni=edge.example.com&fp=chrome&pbk=entry-key&type=tcp&headerType=none#香港',
+    )
+    const exit = parseSocks5Link('socks5://user:pass@exit.example.com:1080#香港')
+    expect(entry).toBeDefined()
+    expect(exit).toBeDefined()
+
+    const yaml = generateClashYaml(entry!, exit!)
+    const names = Array.from(yaml.matchAll(/^\s*-?\s*name: "?([^"\n]+)"?/gm)).map((match) => match[1])
+
+    expect(yaml).toContain('name: 香港-入口')
+    expect(yaml).toContain('name: 香港-出口')
+    expect(yaml).toContain('dialer-proxy: 入口节点')
+    expect(new Set(names).size).toBe(names.length)
   })
 
   it('生成 import links 文本', () => {
