@@ -5,6 +5,7 @@ import {
   generateXrayJson,
   parseHysteria2Link,
   parseProxyInput,
+  parseShadowsocksLink,
   parseSocks5Link,
   parseVlessLink,
   parseYamlProxies,
@@ -60,6 +61,20 @@ describe('proxy-chain parsing', () => {
     })
   })
 
+  it('解析 Shadowsocks/SS 链接', () => {
+    const node = parseShadowsocksLink('ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpzcy1wYXNz@ss.example.com:8388?plugin=obfs#SS%20Link')
+
+    expect(node).toMatchObject({
+      type: 'ss',
+      cipher: 'chacha20-ietf-poly1305',
+      password: 'ss-pass',
+      server: 'ss.example.com',
+      port: 8388,
+      plugin: 'obfs',
+      name: 'SS Link',
+    })
+  })
+
   it('解析 Mihomo/Clash YAML proxies 数组', () => {
     const nodes = parseYamlProxies(`
 proxies:
@@ -100,6 +115,73 @@ proxies:
     })
   })
 
+  it('解析 Shadowsocks/SS YAML 节点并保留插件字段', () => {
+    const nodes = parseYamlProxies(`
+proxies:
+  - name: "YAML SS"
+    type: ss
+    server: ss.yaml.example.com
+    port: 8388
+    udp: true
+    udp-over-tcp: true
+    cipher: chacha20-ietf-poly1305
+    password: ss-yaml-pass
+    plugin: obfs
+    plugin-opts:
+      mode: tls
+      host: example.com
+`)
+
+    expect(nodes).toHaveLength(1)
+    expect(nodes[0]).toMatchObject({
+      type: 'ss',
+      name: 'YAML SS',
+      cipher: 'chacha20-ietf-poly1305',
+      password: 'ss-yaml-pass',
+      plugin: 'obfs',
+      pluginOpts: {
+        mode: 'tls',
+        host: 'example.com',
+      },
+      udp: true,
+      udpOverTcp: true,
+    })
+  })
+
+  it('解析 GLaDOS 风格的 Mihomo Shadowsocks/SS 订阅结构', () => {
+    const result = parseProxyInput(`
+proxies:
+  - name: "US-Balancer-N1-1"
+    type: ss
+    server: ss-1.example.com
+    port: 2377
+    udp: true
+    udp-over-tcp: true
+    cipher: chacha20-ietf-poly1305
+    password: ss-pass-1
+    plugin: obfs
+    plugin-opts:
+      mode: tls
+      host: edge.example.com
+  - name: "US-Balancer-N1-2"
+    type: ss
+    server: ss-2.example.com
+    port: 2378
+    udp: true
+    udp-over-tcp: true
+    cipher: chacha20-ietf-poly1305
+    password: ss-pass-2
+    plugin: obfs
+    plugin-opts:
+      mode: tls
+      host: edge.example.com
+`)
+
+    expect(result.nodes).toHaveLength(2)
+    expect(new Set(result.nodes.map((node) => node.type))).toEqual(new Set(['ss']))
+    expect(result.warnings).toHaveLength(0)
+  })
+
   it('解析单个 hysteria2 YAML 片段', () => {
     const result = parseProxyInput(`
 name: HY2
@@ -135,6 +217,20 @@ describe('proxy-chain generation', () => {
     expect(yaml).toContain('name: PROXY')
     expect(yaml).toContain('dialer-proxy: 入口节点')
     expect(yaml).not.toContain('relay')
+  })
+
+  it('Clash/Mihomo 输出支持 Shadowsocks/SS 节点字段', () => {
+    const entry = parseShadowsocksLink('ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTplbnRyeS1wYXNz@entry-ss.example.com:8388#Entry%20SS')
+    const exit = parseSocks5Link('socks5://user:pass@exit.example.com:1080#Exit')
+    expect(entry).toBeDefined()
+    expect(exit).toBeDefined()
+
+    const yaml = generateClashYaml(entry!, exit!)
+
+    expect(yaml).toContain('type: ss')
+    expect(yaml).toContain('cipher: chacha20-ietf-poly1305')
+    expect(yaml).toContain('password: entry-pass')
+    expect(yaml).toContain('dialer-proxy: 入口节点')
   })
 
   it('v2rayN/Xray JSON 输出包含 proxySettings', () => {

@@ -36,9 +36,9 @@ const copyText = {
     inputTitle: '输入',
     inputDescription: '入口和出口分开粘贴，避免订阅节点与出口节点混在一起。',
     entryInputTitle: '入口输入',
-    entryInputDescription: '可粘贴 VLESS、SOCKS5、Hysteria2 链接，入口订阅地址，或配置片段。',
+    entryInputDescription: '可粘贴 VLESS、SOCKS5、Hysteria2、Shadowsocks/SS 链接，入口订阅地址，或配置片段。',
     exitInputTitle: '出口输入',
-    exitInputDescription: '可粘贴 VLESS、SOCKS5、Hysteria2 链接，出口订阅地址，或配置片段。',
+    exitInputDescription: '可粘贴 VLESS、SOCKS5、Hysteria2、Shadowsocks/SS 链接，出口订阅地址，或配置片段。',
     examples: '示例',
     editorLabel: '内容',
     lines: '行',
@@ -91,9 +91,9 @@ const copyText = {
     inputTitle: 'Input',
     inputDescription: 'Paste entry and exit separately so subscription nodes never mix with exit nodes.',
     entryInputTitle: 'Entry input',
-    entryInputDescription: 'Paste VLESS, SOCKS5, Hysteria2 links, an entry subscription URL, or YAML node content.',
+    entryInputDescription: 'Paste VLESS, SOCKS5, Hysteria2, Shadowsocks/SS links, an entry subscription URL, or YAML node content.',
     exitInputTitle: 'Exit input',
-    exitInputDescription: 'Paste VLESS, SOCKS5, Hysteria2 links, an exit subscription URL, or YAML node content.',
+    exitInputDescription: 'Paste VLESS, SOCKS5, Hysteria2, Shadowsocks/SS links, an exit subscription URL, or YAML node content.',
     examples: 'Example',
     editorLabel: 'Content',
     lines: 'lines',
@@ -143,12 +143,14 @@ const entryExample = [
   'vless://11111111-1111-4111-8111-111111111111@203.0.113.10:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.example.com&fp=chrome&pbk=********&type=tcp&headerType=none#入口-VLESS',
   'socks5://demo:********@203.0.113.20:1080#入口-SOCKS5',
   'hysteria2://demo-pass@203.0.113.30:8443?sni=www.example.com&insecure=1#入口-HY2',
+  'ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpkZW1vLXBhc3M@203.0.113.40:8388#入口-SS',
 ].join('\n')
 
 const exitExample = [
   'socks5://demo:********@198.51.100.14:1193#出口-SOCKS5',
   'hysteria2://demo-pass@198.51.100.24:8443?sni=www.example.com&insecure=1#出口-HY2',
   'vless://22222222-2222-4222-8222-222222222222@198.51.100.34:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.example.org&fp=chrome&pbk=********&type=tcp&headerType=none#出口-VLESS',
+  'ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpkZW1vLXBhc3M@198.51.100.44:8388#出口-SS',
 ].join('\n')
 
 function App() {

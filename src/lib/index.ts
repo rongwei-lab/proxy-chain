@@ -5,6 +5,7 @@ export type {
   NormalizedProxyNode,
   ParseResult,
   ProxyNodeType,
+  ShadowsocksProxyNode,
   Socks5ProxyNode,
   VlessProxyNode,
 } from './proxy-chain'
@@ -15,6 +16,7 @@ export {
   generateXrayJson,
   parseHysteria2Link,
   parseProxyInput,
+  parseShadowsocksLink,
   parseSocks5Link,
   parseVlessLink,
   parseYamlProxies,

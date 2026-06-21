@@ -1,6 +1,7 @@
 import { parse as parseYamlDocument } from 'yaml'
 
-export type ProxyNodeType = 'vless' | 'socks5' | 'hysteria2'
+export type ProxyNodeType = 'vless' | 'socks5' | 'hysteria2' | 'ss'
+type ProxyScalar = string | number | boolean
 
 export interface BaseProxyNode {
   id: string
@@ -37,7 +38,17 @@ export interface Hysteria2ProxyNode extends BaseProxyNode {
   udp?: boolean
 }
 
-export type NormalizedProxyNode = VlessProxyNode | Socks5ProxyNode | Hysteria2ProxyNode
+export interface ShadowsocksProxyNode extends BaseProxyNode {
+  type: 'ss'
+  cipher: string
+  password: string
+  plugin?: string
+  pluginOpts?: Record<string, ProxyScalar>
+  udp?: boolean
+  udpOverTcp?: boolean
+}
+
+export type NormalizedProxyNode = VlessProxyNode | Socks5ProxyNode | Hysteria2ProxyNode | ShadowsocksProxyNode
 
 type LooseYamlValue = string | number | boolean | undefined
 type LooseYamlNode = LooseYamlValue | LooseYamlObject | LooseYamlNode[]
@@ -59,7 +70,7 @@ export interface ParseResult {
 }
 
 const HY2_TYPES = new Set(['hysteria2', 'hy2'])
-const SUPPORTED_TYPES = new Set<ProxyNodeType>(['vless', 'socks5', 'hysteria2'])
+const SUPPORTED_TYPES = new Set<ProxyNodeType>(['vless', 'socks5', 'hysteria2', 'ss'])
 
 /**
  * 解析用户粘贴的链接或订阅文本。这里刻意不 fetch 远程订阅 URL：
@@ -96,6 +107,16 @@ export function parseProxyInput(input: string): ParseResult {
       continue
     }
 
+    if (chunk.startsWith('ss://')) {
+      const parsed = parseShadowsocksLink(chunk)
+      if (parsed) {
+        nodes.push(parsed)
+      } else {
+        warnings.push('发现 Shadowsocks/SS 链接，但链接格式不完整。')
+      }
+      continue
+    }
+
     if (chunk.startsWith('hysteria2://') || chunk.startsWith('hy2://')) {
       const parsed = parseHysteria2Link(chunk)
       if (parsed) {
@@ -112,7 +133,7 @@ export function parseProxyInput(input: string): ParseResult {
       continue
     }
 
-    warnings.push('有一段输入未能识别为 VLESS、SOCKS5、Hysteria2 或受支持的 YAML 节点。')
+    warnings.push('有一段输入未能识别为 VLESS、SOCKS5、Hysteria2、Shadowsocks/SS 或受支持的 YAML 节点。')
   }
 
   return { nodes: dedupeNodes(nodes), warnings }
@@ -212,12 +233,61 @@ export function parseHysteria2Link(link: string): Hysteria2ProxyNode | undefined
   }
 }
 
+export function parseShadowsocksLink(link: string): ShadowsocksProxyNode | undefined {
+  try {
+    const [withoutHash, hash = ''] = link.split('#', 2)
+    const nameFromHash = hash ? decodeURIComponent(hash).trim() : ''
+
+    if (withoutHash.includes('@')) {
+      const url = new URL(link)
+      const userInfo = url.password
+        ? `${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`
+        : decodeBase64Url(decodeURIComponent(url.username))
+      const separatorIndex = userInfo.indexOf(':')
+      const cipher = separatorIndex >= 0 ? userInfo.slice(0, separatorIndex) : ''
+      const password = separatorIndex >= 0 ? userInfo.slice(separatorIndex + 1) : ''
+      const server = url.hostname
+      const port = parsePort(url.port)
+
+      if (!cipher || !password || !server || port === undefined) {
+        return undefined
+      }
+
+      return buildShadowsocksNode({
+        cipher,
+        password,
+        server,
+        port,
+        name: nameFromHash || decodeName(url.hash, `${server}:${port}`),
+        params: url.searchParams,
+        raw: link,
+      })
+    }
+
+    const [withoutQuery, rawQuery = ''] = withoutHash.slice('ss://'.length).split('?', 2)
+    const decoded = decodeBase64Url(withoutQuery)
+    const parsed = parseShadowsocksAuthority(decoded)
+    if (!parsed) {
+      return undefined
+    }
+
+    return buildShadowsocksNode({
+      ...parsed,
+      name: nameFromHash || `${parsed.server}:${parsed.port}`,
+      params: new URLSearchParams(rawQuery),
+      raw: link,
+    })
+  } catch {
+    return undefined
+  }
+}
+
 export function parseYamlProxies(yamlText: string): NormalizedProxyNode[] {
-  let parsed: LooseYamlObject
+  let parsed: LooseYamlObject | LooseYamlObject[]
 
   try {
     const document = parseYamlDocument(yamlText) as unknown
-    parsed = isYamlObject(document) ? document : parseLooseYaml(yamlText)
+    parsed = isYamlObject(document) || isYamlObjectArray(document) ? document : parseLooseYaml(yamlText)
   } catch {
     try {
       parsed = parseLooseYaml(yamlText)
@@ -336,6 +406,7 @@ function isSupportedProxyLink(line: string): boolean {
   return (
     line.startsWith('vless://') ||
     line.startsWith('socks5://') ||
+    line.startsWith('ss://') ||
     line.startsWith('hysteria2://') ||
     line.startsWith('hy2://')
   )
@@ -371,6 +442,72 @@ function optionalBooleanParam(params: URLSearchParams, key: string): boolean | u
   return undefined
 }
 
+function parseShadowsocksAuthority(
+  decoded: string,
+): { cipher: string; password: string; server: string; port: number } | undefined {
+  const atIndex = decoded.lastIndexOf('@')
+  const colonIndex = decoded.indexOf(':')
+  if (atIndex < 0 || colonIndex < 0 || colonIndex > atIndex) {
+    return undefined
+  }
+
+  const cipher = decoded.slice(0, colonIndex)
+  const password = decoded.slice(colonIndex + 1, atIndex)
+  const hostPort = decoded.slice(atIndex + 1)
+  const portSeparatorIndex = hostPort.lastIndexOf(':')
+  if (!cipher || !password || portSeparatorIndex < 0) {
+    return undefined
+  }
+
+  const server = hostPort.slice(0, portSeparatorIndex)
+  const port = parsePort(hostPort.slice(portSeparatorIndex + 1))
+  if (!server || port === undefined) {
+    return undefined
+  }
+
+  return { cipher, password, server, port }
+}
+
+function buildShadowsocksNode({
+  cipher,
+  password,
+  server,
+  port,
+  name,
+  params,
+  raw,
+}: {
+  cipher: string
+  password: string
+  server: string
+  port: number
+  name: string
+  params: URLSearchParams
+  raw: string
+}): ShadowsocksProxyNode {
+  return {
+    id: stableNodeId('ss', name, server, port, password),
+    type: 'ss',
+    name,
+    server,
+    port,
+    cipher,
+    password,
+    plugin: optionalParam(params, 'plugin'),
+    raw,
+  }
+}
+
+function decodeBase64Url(value: string): string {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), '=')
+  return atob(padded)
+}
+
+function encodeBase64Url(value: string): string {
+  return btoa(value).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
 function parsePort(value: string | number | undefined): number | undefined {
   const numeric = typeof value === 'number' ? value : Number(value)
   if (!Number.isInteger(numeric) || numeric < 1 || numeric > 65535) {
@@ -379,7 +516,11 @@ function parsePort(value: string | number | undefined): number | undefined {
   return numeric
 }
 
-function readProxyEntries(parsed: LooseYamlObject): ClashProxyEntry[] {
+function readProxyEntries(parsed: LooseYamlObject | LooseYamlObject[]): ClashProxyEntry[] {
+  if (Array.isArray(parsed)) {
+    return parsed.filter(isYamlObject) as ClashProxyEntry[]
+  }
+
   const proxies = parsed.proxies
   if (Array.isArray(proxies)) {
     return proxies.filter(isYamlObject) as ClashProxyEntry[]
@@ -438,6 +579,29 @@ function normalizeYamlProxy(proxy: ClashProxyEntry, raw: string): NormalizedProx
       username: asString(proxy.username),
       password: asString(proxy.password),
       udp: asBoolean(proxy.udp),
+      raw,
+    }
+  }
+
+  if (type === 'ss') {
+    const cipher = asString(proxy.cipher)
+    const password = asString(proxy.password)
+    if (!cipher || !password) {
+      return undefined
+    }
+
+    return {
+      id: stableNodeId('ss', name, server, port, password),
+      type: 'ss',
+      name,
+      server,
+      port,
+      cipher,
+      password,
+      plugin: asString(proxy.plugin),
+      pluginOpts: readScalarRecord(proxy['plugin-opts']),
+      udp: asBoolean(proxy.udp),
+      udpOverTcp: asBoolean(proxy['udp-over-tcp']),
       raw,
     }
   }
@@ -659,6 +823,18 @@ function toClashProxy(node: NormalizedProxyNode, name: string): LooseYamlObject 
     })
   }
 
+  if (node.type === 'ss') {
+    return dropUndefined({
+      ...common,
+      cipher: node.cipher,
+      password: node.password,
+      plugin: node.plugin,
+      'plugin-opts': node.pluginOpts,
+      udp: node.udp ?? true,
+      'udp-over-tcp': node.udpOverTcp,
+    })
+  }
+
   return dropUndefined({
     ...common,
     password: node.password,
@@ -725,6 +901,23 @@ function toXrayOutbound(node: NormalizedProxyNode, tag: string): Record<string, 
     }
   }
 
+  if (node.type === 'ss') {
+    return {
+      tag,
+      protocol: 'shadowsocks',
+      settings: {
+        servers: [
+          dropUndefined({
+            address: node.server,
+            port: node.port,
+            method: node.cipher,
+            password: node.password,
+          }),
+        ],
+      },
+    }
+  }
+
   return {
     tag,
     protocol: 'hysteria2',
@@ -769,6 +962,14 @@ function toImportLink(node: NormalizedProxyNode): string {
         ? `${encodeURIComponent(node.username ?? '')}:${encodeURIComponent(node.password ?? '')}@`
         : ''
     return `socks5://${auth}${node.server}:${node.port}#${encodeURIComponent(node.name)}`
+  }
+
+  if (node.type === 'ss') {
+    const userInfo = encodeBase64Url(`${node.cipher}:${node.password}`)
+    const params = new URLSearchParams()
+    addParam(params, 'plugin', node.plugin)
+    const query = params.toString()
+    return `ss://${userInfo}@${node.server}:${node.port}${query ? `?${query}` : ''}#${encodeURIComponent(node.name)}`
   }
 
   const params = new URLSearchParams()
@@ -938,6 +1139,10 @@ function isYamlObject(value: unknown): value is LooseYamlObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function isYamlObjectArray(value: unknown): value is LooseYamlObject[] {
+  return Array.isArray(value) && value.every(isYamlObject)
+}
+
 function asString(value: unknown): string | undefined {
   if (typeof value === 'string') {
     return value
@@ -956,4 +1161,17 @@ function asBoolean(value: unknown): boolean | undefined {
     return value.toLowerCase() === 'true'
   }
   return undefined
+}
+
+function readScalarRecord(value: unknown): Record<string, ProxyScalar> | undefined {
+  if (!isYamlObject(value)) {
+    return undefined
+  }
+
+  const entries = Object.entries(value).filter((entry): entry is [string, ProxyScalar] => {
+    const [, item] = entry
+    return typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean'
+  })
+
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined
 }
