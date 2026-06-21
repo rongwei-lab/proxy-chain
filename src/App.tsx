@@ -49,6 +49,16 @@ const copyText = {
     fetchUnsupported: '请输入 http(s) 订阅地址后再拉取。',
     fetchFailed: '订阅拉取失败：可能被跨域策略、网络或订阅服务限制拦截。可以在浏览器打开订阅后复制配置内容粘贴。',
     subscriptionUrlHint: '检测到订阅地址。请点击“拉取订阅”；成功后输入框会替换为完整 Mihomo/Clash 配置内容并自动解析。也可以在浏览器打开订阅后复制完整配置粘贴。',
+    fetcherTitle: '订阅拉取服务',
+    fetcherDescription: '可选。部署自己的拉取服务后，浏览器无法跨域直连的订阅也可以通过你的服务器读取。',
+    fetcherEndpointLabel: '服务地址',
+    fetcherEndpointPlaceholder: 'https://fetch.example.com/fetch-subscription',
+    fetcherTokenLabel: '访问令牌',
+    fetcherTokenPlaceholder: 'Bearer token，不会保存到本地',
+    fetcherModeDirect: '直连',
+    fetcherModeService: '自建服务',
+    fetcherModeAuto: '自动',
+    fetchFailedWithService: '订阅拉取失败：直连和自建服务都未成功。请检查服务地址、令牌、允许域名或订阅链接。',
     parsedPrefix: '已解析',
     parsedSuffix: '个候选',
     chainTitle: '链式代理',
@@ -109,6 +119,16 @@ const copyText = {
     fetchUnsupported: 'Enter an http(s) subscription URL before fetching.',
     fetchFailed: 'Failed to fetch subscription. It may be blocked by CORS, network, or provider policy. Open it in your browser and paste the YAML content instead.',
     subscriptionUrlHint: 'Subscription URL detected. Click “Fetch subscription”; after success the input will be replaced with full Mihomo/Clash config content and parsed automatically. You can also open the URL in your browser and paste the full config here.',
+    fetcherTitle: 'Subscription fetcher',
+    fetcherDescription: 'Optional. After deploying your own fetcher, subscriptions blocked by browser CORS can be read through your server.',
+    fetcherEndpointLabel: 'Service endpoint',
+    fetcherEndpointPlaceholder: 'https://fetch.example.com/fetch-subscription',
+    fetcherTokenLabel: 'Access token',
+    fetcherTokenPlaceholder: 'Bearer token, not stored locally',
+    fetcherModeDirect: 'Direct',
+    fetcherModeService: 'Service',
+    fetcherModeAuto: 'Auto',
+    fetchFailedWithService: 'Failed to fetch subscription. Direct fetch and self-hosted service both failed. Check endpoint, token, allowed host, or subscription URL.',
     parsedPrefix: 'Parsed',
     parsedSuffix: 'candidates',
     chainTitle: 'Chain',
@@ -166,6 +186,9 @@ const exitExample = [
 function App() {
   const [language, setLanguage] = useState<Language>('zh')
   const [outputMode, setOutputMode] = useState<OutputMode>('clash')
+  const [fetchMode, setFetchMode] = useState<'direct' | 'service' | 'auto'>('auto')
+  const [fetcherEndpoint, setFetcherEndpoint] = useState('')
+  const [fetcherToken, setFetcherToken] = useState('')
   const [entryInput, setEntryInput] = useState('')
   const [exitInput, setExitInput] = useState('')
   const [entryIds, setEntryIds] = useState<string[] | undefined>()
@@ -216,6 +239,9 @@ function App() {
   const chainLabel = buildChainLabel(selectedEntries, selectedExits, t)
   const entryIsSubscriptionUrl = isHttpSubscriptionInput(entryInput)
   const exitIsSubscriptionUrl = isHttpSubscriptionInput(exitInput)
+  const fetchFailedMessage = fetchMode !== 'direct' && fetcherEndpoint.trim()
+    ? t.fetchFailedWithService
+    : t.fetchFailed
 
   function setInputValue(slot: FetchSlot, value: string) {
     if (slot === 'entry') {
@@ -242,12 +268,12 @@ function App() {
 
     setFetchState((current) => ({ ...current, [slot]: 'loading' }))
     try {
-      // 订阅拉取只在用户点击后发生；不会自动请求，也不会经过后端保存或转发。
-      const response = await fetch(source, { cache: 'no-store' })
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-      setInputValue(slot, await response.text())
+      const content = await loadSubscriptionContent(source, {
+        endpoint: fetcherEndpoint.trim(),
+        token: fetcherToken.trim(),
+        mode: fetchMode,
+      })
+      setInputValue(slot, content)
       setFetchState((current) => ({ ...current, [slot]: 'success' }))
     } catch {
       setFetchState((current) => ({ ...current, [slot]: 'failed' }))
@@ -332,6 +358,52 @@ function App() {
             </div>
           </div>
 
+          <section className="fetcher-card" aria-label={t.fetcherTitle}>
+            <div className="fetcher-heading">
+              <div>
+                <h3>{t.fetcherTitle}</h3>
+                <p>{t.fetcherDescription}</p>
+              </div>
+            </div>
+            <div className="fetcher-controls">
+              <div className="segmented-control fetcher-mode" role="tablist" aria-label={t.fetcherTitle}>
+                {[
+                  { value: 'auto', label: t.fetcherModeAuto },
+                  { value: 'direct', label: t.fetcherModeDirect },
+                  { value: 'service', label: t.fetcherModeService },
+                ].map((mode) => (
+                  <button
+                    key={mode.value}
+                    className={fetchMode === mode.value ? 'active' : ''}
+                    type="button"
+                    onClick={() => setFetchMode(mode.value as 'direct' | 'service' | 'auto')}
+                  >
+                    {mode.label}
+                  </button>
+                ))}
+              </div>
+              <label>
+                <span>{t.fetcherEndpointLabel}</span>
+                <input
+                  value={fetcherEndpoint}
+                  placeholder={t.fetcherEndpointPlaceholder}
+                  spellCheck={false}
+                  onChange={(event) => setFetcherEndpoint(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>{t.fetcherTokenLabel}</span>
+                <input
+                  value={fetcherToken}
+                  placeholder={t.fetcherTokenPlaceholder}
+                  spellCheck={false}
+                  type="password"
+                  onChange={(event) => setFetcherToken(event.target.value)}
+                />
+              </label>
+            </div>
+          </section>
+
           <div className="dual-input-grid">
             <ProxyInputCard
               id="entry-input"
@@ -349,6 +421,7 @@ function App() {
               parsedCount={entryCandidates.length}
               fetchState={fetchState.entry}
               fetchMessages={t}
+              fetchFailedMessage={fetchFailedMessage}
               subscriptionHint={
                 entryIsSubscriptionUrl && fetchState.entry !== 'loading' && fetchState.entry !== 'success'
                   ? t.subscriptionUrlHint
@@ -377,6 +450,7 @@ function App() {
               parsedCount={exitCandidates.length}
               fetchState={fetchState.exit}
               fetchMessages={t}
+              fetchFailedMessage={fetchFailedMessage}
               subscriptionHint={
                 exitIsSubscriptionUrl && fetchState.exit !== 'loading' && fetchState.exit !== 'success'
                   ? t.subscriptionUrlHint
@@ -503,6 +577,7 @@ interface ProxyInputCardProps {
   parsedCount: number
   fetchState: FetchState
   fetchMessages: Record<string, string>
+  fetchFailedMessage: string
   subscriptionHint?: string
   warnings: string[]
   onChange: (value: string) => void
@@ -527,6 +602,7 @@ function ProxyInputCard({
   parsedCount,
   fetchState,
   fetchMessages,
+  fetchFailedMessage,
   subscriptionHint,
   warnings,
   onChange,
@@ -596,7 +672,7 @@ function ProxyInputCard({
             ? fetchMessages.fetchSuccess
             : fetchState === 'unsupported'
               ? fetchMessages.fetchUnsupported
-              : fetchMessages.fetchFailed}
+              : fetchFailedMessage}
         </div>
       )}
     </section>
@@ -736,6 +812,62 @@ function isHttpSubscriptionInput(value: string) {
   // 这里仅识别“输入框里只有一个 http(s) 地址”的场景。
   // 如果用户粘贴的是完整 YAML，里面可能包含 URL 字段，不能误判为订阅地址。
   return /^https?:\/\/\S+$/i.test(text)
+}
+
+async function loadSubscriptionContent(
+  sourceUrl: string,
+  options: { endpoint: string; token: string; mode: 'direct' | 'service' | 'auto' },
+) {
+  if (options.mode === 'service') {
+    return fetchViaSubscriptionService(sourceUrl, options)
+  }
+
+  try {
+    return await fetchDirectSubscription(sourceUrl)
+  } catch (directError) {
+    if (options.mode !== 'auto' || !options.endpoint) {
+      throw directError
+    }
+    return fetchViaSubscriptionService(sourceUrl, options)
+  }
+}
+
+async function fetchDirectSubscription(sourceUrl: string) {
+  // 订阅拉取只在用户点击后发生；不会自动请求，也不会经过后端保存或转发。
+  const response = await fetch(sourceUrl, { cache: 'no-store' })
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`)
+  }
+  return response.text()
+}
+
+async function fetchViaSubscriptionService(
+  sourceUrl: string,
+  options: { endpoint: string; token: string },
+) {
+  if (!options.endpoint || !options.token) {
+    throw new Error('subscription fetcher endpoint and token are required')
+  }
+
+  const response = await fetch(options.endpoint, {
+    method: 'POST',
+    cache: 'no-store',
+    headers: {
+      authorization: `Bearer ${options.token}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ url: sourceUrl }),
+  })
+
+  if (!response.ok) {
+    throw new Error(`fetcher HTTP ${response.status}`)
+  }
+
+  const payload = await response.json() as { content?: unknown }
+  if (typeof payload.content !== 'string') {
+    throw new Error('fetcher response missing content')
+  }
+  return payload.content
 }
 
 function isValidJsonOutput(outputMode: OutputMode, generated: string) {
