@@ -1,7 +1,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { parse as parseYaml } from 'yaml'
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import App from '../App'
 
 declare global {
@@ -1334,6 +1334,76 @@ describe('本地上传文件与常驻链路示意回归', () => {
     }
     expect(config.proxies.map((proxy) => proxy.name)).toEqual(['手动入口', '批量入口', '文件出口'])
     expect(config.proxies.find((proxy) => proxy.name === '文件出口')?.['dialer-proxy']).toBe('入口节点')
+  })
+
+  it('上传完整链式 YAML 恢复 6 个入口和 2 个出口，同连接的直连与链式定义均可导出', async () => {
+    const fetchMock = vi.fn(async () => new Response('', { status: 404 }))
+    globalThis.fetch = fetchMock
+    await act(async () => root.render(<App />))
+    await flushMicrotasks()
+    await importDemoNodes(container)
+    await gotoStep(container, 1)
+
+    const entries = Array.from({ length: 6 }, (_, index) => ({
+      name: `前置-${index + 1}`,
+      type: 'vless',
+      server: `192.0.2.${index + 1}`,
+      port: 443,
+      uuid: '11111111-1111-4111-8111-111111111111',
+      network: 'tcp',
+      tls: true,
+      'reality-opts': { 'public-key': 'example-public-key' },
+    }))
+    const exits = [
+      { ...entries[3], name: '落地-A', 'dialer-proxy': '前置池' },
+      { name: '落地-B', type: 'socks5', server: '203.0.113.8', port: 1080, 'dialer-proxy': '前置池' },
+    ]
+    // 与节点定义的顺序不同，导入后仍按代理组的顺序选择和导出。
+    const groups = [
+      { name: '前置池', type: 'select', proxies: entries.map((node) => node.name).reverse() },
+      { name: '落地池', type: 'select', proxies: exits.map((node) => node.name) },
+    ]
+    const original = { proxies: [...entries, ...exits], 'proxy-groups': groups, rules: ['GEOIP,CN,DIRECT', 'MATCH,落地池'] }
+    const file = new File([stringifyYaml(original)], '还原链路.yaml', { type: 'text/yaml' })
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="上传文件"]')!
+    Object.defineProperty(input, 'files', { value: [file] })
+    await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })))
+    await flushMicrotasks()
+    expect(container.textContent).toContain('已恢复 2 层链路，入口 6 个、出口 2 个')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await gotoStep(container, 2)
+    const [entry, exit] = container.querySelectorAll<HTMLElement>('.stage-card')
+    for (const [card, group] of [[entry, groups[0]], [exit, groups[1]]] as const) {
+      const rows = Array.from(card.querySelectorAll('.selector-node-item'))
+      expect(rows.map((row) => row.querySelector('.node-alias')?.textContent)).toEqual(group.proxies)
+      expect(rows.every((row) => row.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked)).toBe(true)
+    }
+    const scope = exit.querySelector<HTMLSelectElement>('select[aria-label="落地池 source filter"]')!
+    await act(async () => setNativeValue(scope, 'all'))
+    expect(exit.querySelectorAll('.selector-node-item')).toHaveLength(12)
+    expect(exit.querySelectorAll('.selector-node-item.is-selected')).toHaveLength(2)
+
+    await gotoStep(container, 3)
+    const output = container.querySelector<HTMLElement>('.output-panel')!
+    await act(async () => findButton(output, '查看配置').click())
+    const exported = parseYaml(output.querySelector('.yaml-fold code')!.textContent ?? '')
+    expect(exported.proxies).toHaveLength(8)
+    expect(exported.proxies.find((proxy: { name: string }) => proxy.name === entries[3].name))
+      .not.toHaveProperty('dialer-proxy')
+    expect(exported.proxies.find((proxy: { name: string }) => proxy.name === exits[0].name))
+      .toMatchObject({ server: entries[3].server, 'dialer-proxy': '前置池' })
+    expect(exported['proxy-groups']).toEqual(groups)
+    expect(exported.rules).toEqual(original.rules)
+
+    await gotoStep(container, 2)
+    await openAdvanced(container, 'chain')
+    const planSelect = container.querySelector<HTMLSelectElement>('.plan-switcher-row select')!
+    expect(planSelect.selectedOptions[0].textContent).toBe('还原链路')
+    await act(async () => setNativeValue(planSelect, 'plan-default'))
+    const [previousEntry, previousExit] = container.querySelectorAll('.stage-card')
+    expect(previousEntry.querySelector('.selector-node-item.is-selected .node-alias')?.textContent).toBe('Entry-SOCKS5-JP')
+    expect(previousExit.querySelector('.selector-node-item.is-selected .node-alias')?.textContent).toBe('Exit-US-Reality')
   })
 
   it('分层订阅关闭后丢弃迟到响应，失败保留输入，重试成功只选入发起层', async () => {

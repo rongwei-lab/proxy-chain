@@ -32,6 +32,7 @@ import type {
   CustomRoutingRule,
   CustomRoutingTarget,
   FetchMode,
+  ImportedMihomoChain,
   ManagedNodeEntry,
   NodeSource,
   NormalizedProxyNode,
@@ -153,15 +154,38 @@ function mergeImportedSource(
   source: NodeSource,
   nodes: NormalizedProxyNode[],
   target?: StageNodeImportTarget,
+  targetNodeIds?: string[],
 ): WorkspaceState {
   const merged = upsertSourceNodes(workspace.registry, workspace.sources, source, nodes)
-  const nodeIds = target ? nodes.map((node) => node.id) : []
+  const nodeIds = target ? targetNodeIds ?? nodes.map((node) => node.id) : []
   return {
     ...workspace,
     ...merged,
     plans: workspace.plans.map((plan) =>
       syncPlanNodeHints(selectImportedStageNodes(plan, target, nodeIds), merged.registry),
     ),
+  }
+}
+
+function createImportedMihomoPlan(chain: ImportedMihomoChain, name: string): ChainPlan {
+  const plan = createDefaultChainPlan(makeClientId('plan'), name)
+  const stages = chain.stages.map(({ name, ...stage }, index) => {
+    const fallback = index === 0
+      ? plan.entry
+      : index === chain.stages.length - 1
+        ? plan.exit
+        : createDefaultStage(`stage-relay-${index}`, `中转 ${index}`)
+    return { ...fallback, ...stage, name: name ?? fallback.name }
+  })
+  const relays = stages.slice(1, -1)
+  return {
+    ...plan,
+    entry: stages[0],
+    relays,
+    exit: stages[stages.length - 1],
+    mode: relays.length > 0 ? 'advanced' : 'simple',
+    routingPreset: chain.routingPreset,
+    hasInitializedSelection: true,
   }
 }
 
@@ -512,6 +536,22 @@ export function App() {
     const label =
       name.trim() ||
       (language === 'zh' ? `粘贴来源-${sources.length + 1}` : `Paste-${sources.length + 1}`)
+    const chain = parsed.mihomoChain && parsed.mihomoChain.stages.length <= MAX_ENABLED_CHAIN_LAYERS
+      ? parsed.mihomoChain
+      : undefined
+    const importedPlan = chain && !context
+      ? createImportedMihomoPlan(chain, label.replace(/\.ya?ml$/i, '').trim() || label)
+      : undefined
+    const targetNodeIds = chain && context
+      ? chain.stages.at(context.target.role === 'entry' ? 0 : -1)?.candidateNodeIds
+      : undefined
+    const restoredDialerIds = new Set(
+      importedPlan && chain ? chain.stages.slice(1).flatMap((stage) => stage.candidateNodeIds) : [],
+    )
+    const nodes = parsed.nodes.map((node) => restoredDialerIds.has(node.id) && node.issues
+      ? { ...node, issues: node.issues.filter((issue) => issue.code !== 'ignored_input_dialer_proxy') }
+      : node,
+    )
     const incoming: NodeSource = {
       id: makeClientId('src'),
       name: label,
@@ -526,13 +566,34 @@ export function App() {
         issues: parsed.issues,
       },
     }
-    setWorkspace((prev) => mergeImportedSource(prev, incoming, parsed.nodes, context?.target))
+    setWorkspace((prev) => {
+      const merged = mergeImportedSource(prev, incoming, nodes, context?.target, targetNodeIds)
+      if (!importedPlan) return merged
+      return {
+        ...merged,
+        plans: [...merged.plans, syncPlanNodeHints(importedPlan, merged.registry)],
+        activePlanId: importedPlan.id,
+      }
+    })
+    const summary = language === 'zh'
+      ? `已添加 "${label}"：有效 ${parsed.validCount} / 不支持 ${parsed.unsupportedCount} / 无效 ${parsed.invalidCount}。`
+      : `Added "${label}": ${parsed.validCount} valid / ${parsed.unsupportedCount} unsupported / ${parsed.invalidCount} invalid.`
+    let chainSummary = ''
+    if (importedPlan) {
+      const entryCount = importedPlan.entry.candidateNodeIds.length
+      const exitCount = importedPlan.exit.candidateNodeIds.length
+      const layerCount = importedPlan.relays.length + 2
+      chainSummary = language === 'zh'
+        ? `已恢复 ${layerCount} 层链路，入口 ${entryCount} 个、出口 ${exitCount} 个。`
+        : ` Restored a ${layerCount}-stage chain with ${entryCount} entry and ${exitCount} exit nodes.`
+    } else if (parsed.mihomoChain !== undefined && !chain) {
+      chainSummary = language === 'zh'
+        ? '未能还原文件中的链路或分流规则，请在链路页核对。'
+        : ' The chain or routing rules could not be restored. Review the chain before exporting.'
+    }
     reportImportFeedback({
       kind: 'info',
-      message:
-        language === 'zh'
-          ? `已添加 "${label}"：有效 ${parsed.validCount} / 不支持 ${parsed.unsupportedCount} / 无效 ${parsed.invalidCount}。`
-          : `Added "${label}": ${parsed.validCount} valid / ${parsed.unsupportedCount} unsupported / ${parsed.invalidCount} invalid.`,
+      message: summary + chainSummary,
     }, context)
     return true
   }

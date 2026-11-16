@@ -1,5 +1,6 @@
 import { parse as parseYamlDocument, stringify as stringifyYamlDocument } from 'yaml'
 import { sha256Hex } from './hash'
+import { readMihomoChain } from './mihomo-chain-import'
 import type {
   ChainConfigOptions,
   ChainSelectionConfigOptions,
@@ -7,6 +8,7 @@ import type {
 import type {
   DetailedParseResult,
   Hysteria2ProxyNode,
+  ImportedMihomoChain,
   NodeDiagnostic,
   NormalizedProxyNode,
   NormalizedProxyNodeWithoutId,
@@ -138,6 +140,7 @@ export function parseProxyInputDetailed(input: string): DetailedParseResult {
   const nodes: NormalizedProxyNode[] = []
   let unsupportedCount = 0
   let invalidCount = 0
+  let mihomoChain: ImportedMihomoChain | null | undefined
 
   for (const chunk of splitInput(text)) {
     if (isUriLine(chunk)) {
@@ -235,6 +238,7 @@ export function parseProxyInputDetailed(input: string): DetailedParseResult {
     }
 
     const yamlResult = parseYamlProxiesDetailed(chunk)
+    mihomoChain = yamlResult.mihomoChain
     if (
       yamlResult.nodes.length > 0 ||
       yamlResult.unsupportedCount > 0 ||
@@ -263,6 +267,7 @@ export function parseProxyInputDetailed(input: string): DetailedParseResult {
     invalidCount,
     issues,
     warnings: Array.from(new Set(warnings)),
+    ...(mihomoChain !== undefined ? { mihomoChain } : {}),
   }
 }
 
@@ -706,6 +711,7 @@ export function parseYamlProxies(yamlText: string): NormalizedProxyNode[] {
 
 export function parseYamlProxiesDetailed(yamlText: string): DetailedParseResult {
   let parsed: LooseYamlObject | LooseYamlObject[] | undefined
+  let config: LooseYamlObject | undefined
   const issues: ParseIssue[] = []
   const warnings: string[] = []
 
@@ -713,6 +719,9 @@ export function parseYamlProxiesDetailed(yamlText: string): DetailedParseResult 
     const document = parseYamlDocument(yamlText) as unknown
     if (isYamlObject(document) || isYamlObjectArray(document)) {
       parsed = document
+      if (isYamlObject(document) && Array.isArray(document.proxies)) {
+        config = document
+      }
     }
   } catch {
     try {
@@ -742,13 +751,23 @@ export function parseYamlProxiesDetailed(yamlText: string): DetailedParseResult 
 
   const proxies = readProxyEntries(parsed)
   const nodes: NormalizedProxyNode[] = []
+  const references = []
   let unsupportedCount = 0
   let invalidCount = 0
 
   for (const proxy of proxies) {
     const res = normalizeYamlProxyDetailed(proxy, yamlText)
-    if (res.node) {
-      nodes.push(res.node)
+    const node = res.node
+    const dialer = proxy['dialer-proxy']
+    if (node && typeof dialer === 'string' && dialer.trim()) {
+      // 相同端点通过不同上游拨号时是独立的节点，不能与直连定义合并。
+      node.id = `${node.id}-${sha256Hex(dialer).slice(0, 16)}`
+    }
+    if (config) {
+      references.push({ name: proxy.name, dialer, nodeId: node?.id })
+    }
+    if (node) {
+      nodes.push(node)
       if (res.warnings.length > 0) {
         warnings.push(...res.warnings)
       }
@@ -767,6 +786,7 @@ export function parseYamlProxiesDetailed(yamlText: string): DetailedParseResult 
   }
 
   const deduped = dedupeNodes(nodes)
+  const mihomoChain = config ? readMihomoChain(config, references) : undefined
   return {
     nodes: deduped,
     validCount: deduped.length,
@@ -774,6 +794,7 @@ export function parseYamlProxiesDetailed(yamlText: string): DetailedParseResult 
     invalidCount,
     issues,
     warnings: Array.from(new Set(warnings)),
+    ...(mihomoChain !== undefined ? { mihomoChain } : {}),
   }
 }
 
@@ -1839,7 +1860,7 @@ function normalizeYamlProxyDetailed(
 
   const name = rawName ?? `${server}:${port}`
 
-  if (proxy['dialer-proxy'] !== undefined) {
+  if (proxy['dialer-proxy'] !== undefined && proxy['dialer-proxy'] !== '') {
     const msg = `节点 "${name}" 输入中包含原有 dialer-proxy，已在归一化时安全忽略；链式依赖将由当前方案生成。`
     nodeDiagnostics.push({
       severity: 'warning',

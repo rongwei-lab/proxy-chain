@@ -56,7 +56,9 @@ export function StageNodeSelector({
 }: StageNodeSelectorProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [protocolFilter, setProtocolFilter] = useState<string>('all')
-  const [sourceFilter, setSourceFilter] = useState<string>('all')
+  const [sourceFilter, setSourceFilter] = useState(() =>
+    stage.candidateNodeIds.length > 0 ? 'selected' : 'all',
+  )
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null)
   const [aliasDraft, setAliasDraft] = useState('')
 
@@ -78,11 +80,17 @@ export function StageNodeSelector({
 
   const filteredEntries = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
-    return allEntries.filter((entry) => {
+    const entries = sourceFilter === 'selected'
+      ? stage.candidateNodeIds.flatMap((id) => {
+          const entry = readRegistryEntry(registry, id)
+          return entry ? [entry] : []
+        })
+      : allEntries
+    return entries.filter((entry) => {
       if (protocolFilter !== 'all' && entry.node.type !== protocolFilter) {
         return false
       }
-      if (sourceFilter !== 'all' && !entry.sourceIds.includes(sourceFilter)) {
+      if (sourceFilter.startsWith('source:') && !entry.sourceIds.includes(sourceFilter.slice(7))) {
         return false
       }
       if (!q) {
@@ -100,7 +108,7 @@ export function StageNodeSelector({
         sourceNames.includes(q)
       )
     })
-  }, [allEntries, protocolFilter, sourceFilter, searchQuery, sourcesById])
+  }, [allEntries, protocolFilter, registry, sourceFilter, searchQuery, sourcesById, stage.candidateNodeIds])
 
   const filteredIds = useMemo(
     () => filteredEntries.map((entry) => entry.node.id),
@@ -142,8 +150,9 @@ export function StageNodeSelector({
           aria-label={`${stage.name} source filter`}
         >
           <option value="all">{copy.filterAllSources}</option>
+          <option value="selected">{language === 'zh' ? '本层已选节点' : 'Selected in this stage'}</option>
           {sources.map((src) => (
-            <option key={src.id} value={src.id}>
+            <option key={src.id} value={`source:${src.id}`}>
               {src.name}
             </option>
           ))}

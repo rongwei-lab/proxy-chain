@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parse as parseYaml } from 'yaml'
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import {
   generateClashYaml,
   generateClashYamlForSelections,
@@ -8,6 +8,7 @@ import {
   generateXrayJsonForSelections,
   parseHysteria2Link,
   parseProxyInput,
+  parseProxyInputDetailed,
   parseShadowsocksLink,
   parseSocks5Link,
   parseVlessLink,
@@ -204,6 +205,45 @@ udp: true
       sni: 'hy2-sni.example.com',
       skipCertVerify: true,
     })
+  })
+
+  it('按 MATCH 目标向上恢复多层链路，兼容直接引用节点和策略组', () => {
+    const result = parseProxyInputDetailed(stringifyYaml({
+      proxies: [
+        { name: '首跳', type: 'socks5', server: 'first.example.invalid', port: 1080 },
+        { name: '中转', type: 'socks5', server: 'relay.example.invalid', port: 1080, 'dialer-proxy': '首跳' },
+        { name: '末跳', type: 'socks5', server: 'last.example.invalid', port: 1080, 'dialer-proxy': '中转池' },
+      ],
+      'proxy-groups': [
+        { name: '中转池', type: 'url-test', proxies: ['中转'], url: 'https://probe.example.invalid/204', interval: 60, tolerance: 0 },
+      ],
+      rules: ['MATCH,末跳'],
+    }))
+    expect(result.mihomoChain).toEqual({
+      routingPreset: 'all-proxy',
+      stages: [
+        { strategy: 'select', candidateNodeIds: [result.nodes[0].id] },
+        {
+          name: '中转池',
+          strategy: 'url-test',
+          candidateNodeIds: [result.nodes[1].id],
+          probe: { url: 'https://probe.example.invalid/204', intervalSeconds: 60, toleranceMs: 0 },
+        },
+        { strategy: 'select', candidateNodeIds: [result.nodes[2].id] },
+      ],
+    })
+  })
+
+  it.each(['missing', 'exit'])('上游引用 %s 无法还原时保留节点并明确报告', (dialer) => {
+    const parsed = parseProxyInputDetailed(stringifyYaml({
+      proxies: [
+        { name: 'entry', type: 'socks5', server: '192.0.2.1', port: 1080 },
+        { name: 'exit', type: 'socks5', server: '192.0.2.1', port: 1080, 'dialer-proxy': dialer },
+      ],
+      rules: ['MATCH,exit'],
+    }))
+    expect(parsed.nodes.map((node) => node.name)).toEqual(['entry', 'exit'])
+    expect(parsed.mihomoChain).toBeNull()
   })
 })
 

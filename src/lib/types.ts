@@ -123,6 +123,8 @@ export interface DetailedParseResult {
   invalidCount: number
   issues: ParseIssue[]
   warnings: string[]
+  /** null 表示识别到链式配置，但无法还原为当前的链路方案。 */
+  mihomoChain?: ImportedMihomoChain | null
 }
 
 export type SourceKind = 'subscription' | 'paste' | 'manual'
@@ -164,6 +166,18 @@ export interface StageProbeConfig {
   url: string
   intervalSeconds: number
   toleranceMs?: number
+}
+
+export interface ImportedMihomoStage {
+  name?: string
+  candidateNodeIds: string[]
+  strategy: SelectionStrategy
+  probe?: StageProbeConfig
+}
+
+export interface ImportedMihomoChain {
+  stages: ImportedMihomoStage[]
+  routingPreset: 'all-proxy' | 'cn-direct'
 }
 
 export interface ChainStage {

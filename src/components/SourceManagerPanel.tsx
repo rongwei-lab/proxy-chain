@@ -117,7 +117,7 @@ export function SourceManagerPanel({
         return
       }
       if (result.kind === 'local-content') {
-        if (onAddPaste(subName, result.text)) {
+        if (onAddPaste(subName.trim() || file.name, result.text)) {
           setSubName('')
         }
       }

@@ -19,6 +19,7 @@ export type {
   DetailedParseResult,
   DiagnosticSeverity,
   Hysteria2ProxyNode,
+  ImportedMihomoChain,
   ManagedNodeEntry,
   NodeDiagnostic,
   NodeReferenceHint,
