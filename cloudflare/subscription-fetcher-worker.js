@@ -1,9 +1,20 @@
 import { WorkerEntrypoint } from 'cloudflare:workers'
+import { parseOriginList } from '../shared/ssrf-guard.mjs'
+import { fetchSubscriptionContent } from './subscription-fetcher-core.js'
 
+/**
+ * Cloudflare Worker 订阅拉取实现。
+ *
+ * 运行时限制说明：
+ * 标准 Workers fetch() 由 Cloudflare 边缘网络栈执行 DNS 解析与建连，无法像 Node.js 那样
+ * 在应用层将单次 DNS 查询结果固定到 TCP/TLS socket（无底层 socket lookup 钩子）。
+ * 本 Worker 在能力边界内严格执行：每跳协议校验、ALLOWED_SUBSCRIPTION_HOSTS 白名单校验、
+ * IPv4/IPv6/IPv4-mapped 字面量拦截、手动重定向（上限 MAX_REDIRECTS）、全链路总超时与响应体大小上限，
+ * 且绝不向上游转发服务访问令牌或泄露完整订阅 URL。
+ */
 export default class SubscriptionFetcherWorker extends WorkerEntrypoint {
   async fetchSubscription(url) {
-    const targetUrl = validateTargetUrl(url, this.env)
-    return fetchSubscriptionContent(targetUrl, this.env)
+    return fetchSubscriptionContent(url, this.env)
   }
 
   async fetch(request) {
@@ -17,7 +28,7 @@ export default class SubscriptionFetcherWorker extends WorkerEntrypoint {
 
     const url = new URL(request.url)
     if (url.pathname === '/healthz' && request.method === 'GET') {
-      return jsonResponse({ ok: true }, 200, corsHeaders)
+      return jsonResponse({ ok: true, mode: 'worker-fetcher' }, 200, corsHeaders)
     }
 
     if (url.pathname !== '/fetch-subscription' || request.method !== 'POST') {
@@ -32,10 +43,15 @@ export default class SubscriptionFetcherWorker extends WorkerEntrypoint {
       return jsonResponse({ error: 'unauthorized' }, 401, corsHeaders)
     }
 
+    let body
     try {
-      const body = await request.json()
-      const targetUrl = validateTargetUrl(body.url, env)
-      const content = await fetchSubscriptionContent(targetUrl, env)
+      body = await request.json()
+    } catch {
+      return jsonResponse({ error: 'invalid_json_body' }, 400, corsHeaders)
+    }
+
+    try {
+      const content = await fetchSubscriptionContent(body?.url, env)
 
       return jsonResponse(
         {
@@ -47,8 +63,8 @@ export default class SubscriptionFetcherWorker extends WorkerEntrypoint {
       )
     } catch (error) {
       return jsonResponse(
-        { error: error.message || 'fetch_failed' },
-        error.statusCode || 500,
+        { error: sanitizeWorkerErrorMessage(error) },
+        error?.statusCode || 500,
         corsHeaders,
       )
     }
@@ -62,7 +78,7 @@ function buildCorsHeaders(origin, env) {
     'access-control-max-age': '86400',
   }
 
-  if (isOriginAllowed(origin, env)) {
+  if (isOriginAllowed(origin, env) && origin) {
     headers['access-control-allow-origin'] = origin
     headers.vary = 'Origin'
   }
@@ -75,124 +91,14 @@ function isOriginAllowed(origin, env) {
     return false
   }
 
-  return parseList(env.ALLOWED_ORIGINS).has(origin)
+  return parseOriginList(env.ALLOWED_ORIGINS).has(origin)
 }
 
-function validateTargetUrl(rawUrl, env) {
-  if (typeof rawUrl !== 'string' || rawUrl.length > 2048) {
-    throw httpError(400, 'invalid_url')
+function sanitizeWorkerErrorMessage(error) {
+  if (error?.statusCode && typeof error?.message === 'string') {
+    return error.message
   }
-
-  let targetUrl
-  try {
-    targetUrl = new URL(rawUrl)
-  } catch {
-    throw httpError(400, 'invalid_url')
-  }
-
-  if (!['http:', 'https:'].includes(targetUrl.protocol)) {
-    throw httpError(400, 'unsupported_protocol')
-  }
-
-  if (!parseList(env.ALLOWED_SUBSCRIPTION_HOSTS).has(targetUrl.hostname)) {
-    throw httpError(403, 'host_not_allowed')
-  }
-
-  if (isBlockedHostname(targetUrl.hostname)) {
-    throw httpError(403, 'blocked_host')
-  }
-
-  return targetUrl
-}
-
-async function fetchSubscriptionContent(targetUrl, env) {
-  const timeoutMs = Number(env.FETCH_TIMEOUT_MS || 12000)
-  const maxBytes = Number(env.MAX_RESPONSE_BYTES || 2 * 1024 * 1024)
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort('timeout'), timeoutMs)
-
-  try {
-    const upstream = await fetch(targetUrl, {
-      redirect: 'follow',
-      signal: controller.signal,
-      headers: {
-        accept: 'text/plain, application/yaml, application/x-yaml, text/yaml, */*',
-        'user-agent': 'proxy-chain-cloudflare-worker/1.0',
-      },
-    })
-
-    if (!upstream.ok) {
-      throw httpError(502, `upstream_http_${upstream.status}`)
-    }
-
-    const reader = upstream.body?.getReader()
-    if (!reader) {
-      throw httpError(502, 'empty_upstream_body')
-    }
-
-    const chunks = []
-    let received = 0
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) {
-        break
-      }
-
-      received += value.byteLength
-      if (received > maxBytes) {
-        throw httpError(413, 'upstream_response_too_large')
-      }
-      chunks.push(value)
-    }
-
-    return new TextDecoder().decode(concatChunks(chunks, received))
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-function concatChunks(chunks, totalLength) {
-  const result = new Uint8Array(totalLength)
-  let offset = 0
-
-  for (const chunk of chunks) {
-    result.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-
-  return result
-}
-
-function parseList(value) {
-  return new Set(
-    String(value || '')
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean),
-  )
-}
-
-function isBlockedHostname(hostname) {
-  const normalized = hostname.toLowerCase()
-
-  return (
-    normalized === 'localhost' ||
-    normalized.endsWith('.localhost') ||
-    normalized === '127.0.0.1' ||
-    normalized === '0.0.0.0' ||
-    normalized === '::1' ||
-    normalized.startsWith('10.') ||
-    normalized.startsWith('192.168.') ||
-    /^172\.(1[6-9]|2\d|3[0-1])\./.test(normalized) ||
-    normalized.startsWith('169.254.')
-  )
-}
-
-function httpError(statusCode, message) {
-  const error = new Error(message)
-  error.statusCode = statusCode
-  return error
+  return 'fetch_failed'
 }
 
 function jsonResponse(payload, status, corsHeaders) {

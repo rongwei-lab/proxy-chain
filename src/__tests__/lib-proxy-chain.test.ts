@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { parse as parseYaml } from 'yaml'
 import {
   generateClashYaml,
   generateClashYamlForSelections,
@@ -255,12 +256,18 @@ describe('proxy-chain generation', () => {
     expect(exit).toBeDefined()
 
     const yaml = generateClashYaml(entry!, exit!)
+    const parsed = parseYaml(yaml) as {
+      proxies: Array<{ name: string; 'dialer-proxy'?: string }>
+    }
     const config = JSON.parse(generateXrayJson(entry!, exit!)) as {
       outbounds: Array<{ protocol: string; proxySettings?: { tag: string } }>
     }
 
-    expect(yaml).toContain('name: "Entry SOCKS-入口"')
-    expect(yaml).toContain('dialer-proxy: 入口节点')
+    expect(parsed.proxies.map((proxy) => proxy.name)).toEqual([
+      'Entry SOCKS-入口',
+      'VLESS Reality-出口',
+    ])
+    expect(parsed.proxies[1]['dialer-proxy']).toBe('入口节点')
     expect(config.outbounds[0].protocol).toBe('vless')
     expect(config.outbounds[0].proxySettings?.tag).toBe('Entry-SOCKS-entry')
   })
@@ -274,11 +281,17 @@ describe('proxy-chain generation', () => {
     expect(exit).toBeDefined()
 
     const yaml = generateClashYaml(entry!, exit!)
-    const names = Array.from(yaml.matchAll(/^\s*-?\s*name: "?([^"\n]+)"?/gm)).map((match) => match[1])
+    const parsed = parseYaml(yaml) as {
+      proxies: Array<{ name: string; 'dialer-proxy'?: string }>
+      'proxy-groups': Array<{ name: string }>
+    }
+    const names = [
+      ...parsed.proxies.map((proxy) => proxy.name),
+      ...parsed['proxy-groups'].map((group) => group.name),
+    ]
 
-    expect(yaml).toContain('name: 香港-入口')
-    expect(yaml).toContain('name: 香港-出口')
-    expect(yaml).toContain('dialer-proxy: 入口节点')
+    expect(parsed.proxies.map((proxy) => proxy.name)).toEqual(['香港-入口', '香港-出口'])
+    expect(parsed.proxies[1]['dialer-proxy']).toBe('入口节点')
     expect(new Set(names).size).toBe(names.length)
   })
 
@@ -298,14 +311,20 @@ describe('proxy-chain generation', () => {
       entries.filter((node): node is NonNullable<typeof node> => Boolean(node)),
       exits.filter((node): node is NonNullable<typeof node> => Boolean(node)),
     )
+    const parsed = parseYaml(yaml) as {
+      proxies: Array<{ name: string; 'dialer-proxy'?: string }>
+      'proxy-groups': Array<{ name: string; proxies: string[] }>
+    }
 
-    expect(yaml).toContain('name: Entry-入口')
-    expect(yaml).toContain('name: Entry-入口-2')
-    expect(yaml).toContain('name: Exit-出口')
-    expect(yaml).toContain('name: Exit-出口-2')
-    expect(yaml.match(/dialer-proxy: 入口节点/g)).toHaveLength(2)
-    expect(yaml).toContain('proxies:\n      - Entry-入口\n      - Entry-入口-2')
-    expect(yaml).toContain('proxies:\n      - Exit-出口\n      - Exit-出口-2')
+    expect(parsed.proxies.map((proxy) => proxy.name)).toEqual([
+      'Entry-入口',
+      'Entry-入口-2',
+      'Exit-出口',
+      'Exit-出口-2',
+    ])
+    expect(parsed.proxies.filter((proxy) => proxy['dialer-proxy'] === '入口节点')).toHaveLength(2)
+    expect(parsed['proxy-groups'][0].proxies).toEqual(['Entry-入口', 'Entry-入口-2'])
+    expect(parsed['proxy-groups'][1].proxies).toEqual(['Exit-出口', 'Exit-出口-2'])
   })
 
   it('v2rayN/Xray 多选导出时多个出口都链到第一个入口', () => {

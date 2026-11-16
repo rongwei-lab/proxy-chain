@@ -1,1153 +1,1694 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowUpRight, Check, Link2, Plus, Route, Settings2, ShieldCheck } from 'lucide-react'
 import {
-  CheckCircle2,
-  Clipboard,
-  Download,
-  ExternalLink,
-  GitBranch,
-  LockKeyhole,
-  RotateCcw,
-  ShieldCheck,
-  SquareArrowDown,
-  Trash2,
-} from 'lucide-react'
-import {
-  generateClashYamlForSelections,
-  generateImportLinks,
-  parseProxyInput,
-  type NormalizedProxyNode,
+  DEFAULT_PROBE_CONFIG,
+  MAX_ENABLED_CHAIN_LAYERS,
+  MAX_PLAN_FILE_BYTES,
+  PLAN_FILE_TOO_LARGE_MESSAGE,
+  buildChainPreview,
+  computeSourceDeletionImpact,
+  createDefaultChainPlan,
+  createDefaultStage,
+  duplicateChainPlan,
+  loadSubscriptionContent,
+  parseProxyInputDetailed,
+  parseYamlProxiesDetailed,
+  probeSameOriginCapabilities,
+  createRegistryFromEntries,
+  removeSourceFromWorkspace,
+  renameNodeDisplayAlias,
+  restoreDeletedSource,
+  serializeWorkspaceState,
+  stringifyYamlConfig,
+  syncPlanNodeHints,
+  upsertSourceNodes,
+  validateAndExportPlan,
+  validateAndRestoreWorkspace,
 } from './lib'
+import type {
+  BackendCapabilities,
+  ChainPlan,
+  ChainStage,
+  CustomRoutingRule,
+  CustomRoutingTarget,
+  FetchMode,
+  ManagedNodeEntry,
+  NodeSource,
+  NormalizedProxyNode,
+  ProxyScalar,
+  RoutingPreset,
+  SelectionStrategy,
+  SourceDeletionImpact,
+} from './lib'
+import { ChainPreviewCard } from './components/ChainPreviewCard'
+import { OutputPanel } from './components/OutputPanel'
+import { PlanWorkspaceBar } from './components/PlanWorkspaceBar'
+import { RoutingConfigCard } from './components/RoutingConfigCard'
+import type { ManualNodeFormState } from './components/manual-node-form-state'
+import { SourceManagerPanel } from './components/SourceManagerPanel'
+import { StageConfigCard } from './components/StageConfigCard'
+import type {
+  NodeImportFeedback,
+  StageNodeImportActions,
+} from './components/StageNodeImportPanel'
+import { StatusBar } from './components/StatusBar'
+import { COPY, type Language } from './components/types-i18n'
 import './App.css'
 
-type OutputMode = 'clash' | 'xray' | 'links'
-type Language = 'zh' | 'en'
-type FetchSlot = 'entry' | 'exit'
-type FetchState = 'idle' | 'loading' | 'success' | 'failed' | 'unsupported'
-type FetchMode = 'auto' | 'hosted' | 'direct' | 'service'
-type SameOriginFetcherState = 'checking' | 'available' | 'unavailable'
-type ImportState = 'idle' | 'packing' | 'opened' | 'failed'
+const LOCAL_STORAGE_KEY = 'proxy-chain:workspace:v1'
 
-const outputModes: OutputMode[] = ['clash', 'xray', 'links']
+interface StageNodeImportTarget {
+  planId: string
+  stageId: string
+  role: 'entry' | 'exit'
+}
 
-const copyText = {
-  zh: {
-    appName: '链式代理实验室',
-    subtitle: '本地优先的链式代理配置生成器',
-    privacyLabel: '隐私状态',
-    localOnly: '本地解析',
-    noUpload: '不保存',
-    inputTitle: '输入',
-    inputDescription: '入口和出口分开粘贴；订阅地址需要先拉取成完整配置内容，再从候选里选择节点。',
-    entryInputTitle: '入口输入',
-    entryInputDescription: '可直接粘贴拉取后的 Mihomo/Clash YAML 配置全文，也可粘贴入口订阅地址后点击拉取订阅。',
-    exitInputTitle: '出口输入',
-    exitInputDescription: '可直接粘贴 VLESS、SOCKS5、Hysteria2、Shadowsocks/SS、YAML 节点，也可粘贴出口订阅地址后点击拉取订阅。',
-    examples: '示例',
-    editorLabel: '内容',
-    lines: '行',
-    clear: '清空',
-    fetchSubscription: '拉取订阅',
-    fetchingSubscription: '拉取中...',
-    fetchSuccess: '订阅内容已加载，已在本地解析。',
-    fetchUnsupported: '请输入 http(s) 订阅地址后再拉取。',
-    fetchFailed: '订阅拉取失败：可能被跨域策略、网络或订阅服务限制拦截。可以在浏览器打开订阅后复制配置内容粘贴。',
-    subscriptionUrlHint: '检测到订阅地址。请点击“拉取订阅”；成功后输入框会替换为完整 Mihomo/Clash 配置内容并自动解析。也可以在浏览器打开订阅后复制完整配置粘贴。',
-    fetcherTitle: '订阅拉取服务',
-    fetcherDescription: '优先使用同源后端拉取订阅；只有选择外部服务时才需要填写地址和令牌。',
-    hostedFetcherAvailable: '同源服务可用',
-    hostedFetcherChecking: '正在检测同源服务',
-    hostedFetcherUnavailable: '当前页面未检测到同源服务',
-    fetcherEndpointLabel: '服务地址',
-    fetcherEndpointPlaceholder: 'https://fetch.example.com/fetch-subscription',
-    fetcherTokenLabel: '访问令牌',
-    fetcherTokenPlaceholder: '外部服务 token，不会保存',
-    fetcherModeDirect: '直连',
-    fetcherModeHosted: '同源服务',
-    fetcherModeService: '外部服务',
-    fetcherModeAuto: '自动',
-    fetchFailedHosted: '订阅拉取失败：同源服务不可用或订阅域名未被允许。',
-    fetchFailedWithManaged: '订阅拉取失败：同源服务和浏览器直连都未成功。请检查允许域名或订阅链接，也可以切换到外部服务。',
-    fetchFailedWithService: '订阅拉取失败：同源服务、浏览器直连和外部服务都未成功。请检查服务地址、令牌、允许域名或订阅链接。',
-    parsedPrefix: '已解析',
-    parsedSuffix: '个候选',
-    chainTitle: '链式代理',
-    chainDescription: '链路会按“入口 → 出口”生成；配置字段会自动使用对应客户端的链式写法。',
-    entry: '入口',
-    exit: '出口',
-    selected: '已选',
-    selectAll: '全选',
-    clearSelection: '清空选择',
-    missingEntry: '未找到可用入口节点',
-    missingExit: '未找到可用出口节点',
-    outputTitle: '输出',
-    outputDescription: '生成内容只在当前浏览器会话中存在。',
-    importClash: '导入 Clash',
-    importingClash: '准备中...',
-    importClashOpened: '已唤起 Clash',
-    importClashFailed: '导入链接生成失败',
-    copy: '复制',
-    copied: '已复制',
-    failed: '失败',
-    download: '下载',
-    outputType: '输出类型',
-    outputModeClash: 'Clash 配置',
-    outputModeXray: 'v2rayN 配置',
-    outputModeLinks: '导入链接',
-    v2rayNGuideTitle: 'v2rayN 链式代理配置',
-    v2rayNStepsTitle: 'v2rayN 操作顺序',
-    v2rayNStepPrepareNodes: '先分别添加入口中转节点和出口落地节点，并确认两个节点都可单独连接。',
-    v2rayNStepLandingGroup: '新建落地家宽分组，普通分组的可选地址 URL 保持为空，并把出口落地节点放入该分组。',
-    v2rayNStepChainGroup: '新建“链式代理”分组，切到该分组后右键空白处选择“添加链式代理”。',
-    v2rayNStepUpstream: '选择入口/中转节点，点击“添加到上游”。',
-    v2rayNStepDownstream: '切到落地分组，选择出口/落地节点，点击“添加到下游”。',
-    v2rayNStepSaveTest: '确认顺序为上游中转、下游落地，不要反过来；保存后设为活动服务器并检查出口 IP。',
-    shadowrocketGuideTitle: 'Shadowrocket（小火箭）导入',
-    shadowrocketGuideIntro: 'Shadowrocket 使用 Clash 配置订阅导入链式规则；请先切到“Clash 配置”，生成并复制可访问的 Clash 配置链接。',
-    shadowrocketSubscribeTitle: '通过 Clash 链接添加',
-    shadowrocketStepOpen: '打开 Shadowrocket，点击右上角“+”。',
-    shadowrocketStepType: '在“添加节点”页面点击“类型”，选择“Subscribe（订阅）”。',
-    shadowrocketStepUrl: '在 URL 地址框粘贴 Clash 配置链接。页面里的“导入 Clash”按钮会生成 Clash 导入链接；也可以使用部署后的配置 URL。',
-    shadowrocketStepSave: '点击右上角“保存”，等待 Shadowrocket 下载并更新 Clash 配置节点列表。',
-    shadowrocketRuntimeTitle: '客户端运行设置',
-    shadowrocketRouteSetting: '全局路由：切换为“配置”。不要开启“全局”或“直连”，否则链式中转规则会失效。',
-    shadowrocketEntryNode: '中转前置节点：选择延迟低、速度快的 HK 或 JP 中转节点。',
-    shadowrocketExitNode: '住宅落地节点：按业务需要选择对应静态住宅 IP 节点。',
-    shadowrocketStartVpn: '启动连接：点击顶部开关，在系统 VPN 配置请求中点击“允许”并输入锁屏密码，开关变绿即连接成功。',
-    preview: '预览',
-    noOutput: '无输出',
-    emptyOutput: '分别填写入口和出口后，这里会生成链式代理配置。',
-    yamlStatus: '配置就绪',
-    jsonStatus: '链路就绪',
-    yamlDetail: '链式字段',
-    jsonDetail: '链式字段',
-    noUploadDetail: '仅当前会话',
-    nodes: '候选',
-    chain: '链路',
-    selectedSummary: '已选节点',
-    waitingChain: '等待选择入口和出口',
-    languageLabel: '语言',
-    zhLanguage: '中文',
-    enLanguage: '英文',
-    chainArrow: '→',
-  },
-  en: {
-    appName: 'Proxy Chain Lab',
-    subtitle: 'Local-first chained proxy config generator',
-    privacyLabel: 'Privacy status',
-    localOnly: 'Local parsing',
-    noUpload: 'No storage',
-    inputTitle: 'Input',
-    inputDescription: 'Paste entry and exit separately. Fetch subscription URLs into full config content before selecting nodes.',
-    entryInputTitle: 'Entry input',
-    entryInputDescription: 'Paste fetched Mihomo/Clash YAML content directly, or paste an entry subscription URL and click Fetch subscription.',
-    exitInputTitle: 'Exit input',
-    exitInputDescription: 'Paste VLESS, SOCKS5, Hysteria2, Shadowsocks/SS, YAML nodes, or an exit subscription URL and click Fetch subscription.',
-    examples: 'Example',
-    editorLabel: 'Content',
-    lines: 'lines',
-    clear: 'Clear',
-    fetchSubscription: 'Fetch subscription',
-    fetchingSubscription: 'Fetching...',
-    fetchSuccess: 'Subscription content loaded and parsed locally.',
-    fetchUnsupported: 'Enter an http(s) subscription URL before fetching.',
-    fetchFailed: 'Failed to fetch subscription. It may be blocked by CORS, network, or provider policy. Open it in your browser and paste the YAML content instead.',
-    subscriptionUrlHint: 'Subscription URL detected. Click “Fetch subscription”; after success the input will be replaced with full Mihomo/Clash config content and parsed automatically. You can also open the URL in your browser and paste the full config here.',
-    fetcherTitle: 'Subscription fetcher',
-    fetcherDescription: 'The app prefers the same-origin backend. Endpoint and token are shown only when External is selected.',
-    hostedFetcherAvailable: 'Same-origin service available',
-    hostedFetcherChecking: 'Checking same-origin service',
-    hostedFetcherUnavailable: 'No same-origin service detected on this page',
-    fetcherEndpointLabel: 'External endpoint',
-    fetcherEndpointPlaceholder: 'https://fetch.example.com/fetch-subscription',
-    fetcherTokenLabel: 'External token',
-    fetcherTokenPlaceholder: 'External service token, not stored',
-    fetcherModeDirect: 'Direct',
-    fetcherModeHosted: 'Same-origin',
-    fetcherModeService: 'External',
-    fetcherModeAuto: 'Auto',
-    fetchFailedHosted: 'Failed to fetch subscription. The same-origin service is unavailable or the subscription host is not allowed.',
-    fetchFailedWithManaged: 'Failed to fetch subscription. Same-origin service and browser direct fetch both failed. Check the allowed host or subscription URL, or switch to External.',
-    fetchFailedWithService: 'Failed to fetch subscription. Same-origin service, browser direct fetch, and external service all failed. Check endpoint, token, allowed host, or subscription URL.',
-    parsedPrefix: 'Parsed',
-    parsedSuffix: 'candidates',
-    chainTitle: 'Chain',
-    chainDescription: 'The generated chain follows entry → exit and uses each client’s native chaining field.',
-    entry: 'Entry',
-    exit: 'Exit',
-    selected: 'Selected',
-    selectAll: 'Select all',
-    clearSelection: 'Clear selection',
-    missingEntry: 'No supported entry node found',
-    missingExit: 'No supported exit node found',
-    outputTitle: 'Output',
-    outputDescription: 'Generated content stays in this browser session.',
-    importClash: 'Import Clash',
-    importingClash: 'Preparing...',
-    importClashOpened: 'Clash opened',
-    importClashFailed: 'Import link failed',
-    copy: 'Copy',
-    copied: 'Copied',
-    failed: 'Failed',
-    download: 'Download',
-    outputType: 'Output type',
-    outputModeClash: 'Clash Verge config',
-    outputModeXray: 'v2rayN JSON config',
-    outputModeLinks: 'Import links',
-    v2rayNGuideTitle: 'v2rayN chained proxy setup',
-    v2rayNStepsTitle: 'v2rayN steps',
-    v2rayNStepPrepareNodes: 'Add the entry relay node and exit landing node separately, and verify both can connect by themselves.',
-    v2rayNStepLandingGroup: 'Create a landing-node group, keep the optional URL field empty for a normal group, and place the exit landing node there.',
-    v2rayNStepChainGroup: 'Create a Chain group, switch to it, then right-click the empty area and choose Add chained proxy.',
-    v2rayNStepUpstream: 'Select the entry/relay node and add it to Upstream.',
-    v2rayNStepDownstream: 'Switch to the landing group, select the exit/landing node, and add it to Downstream.',
-    v2rayNStepSaveTest: 'Confirm upstream is relay and downstream is landing, do not reverse them, then save, set active, and check the exit IP.',
-    shadowrocketGuideTitle: 'Shadowrocket import',
-    shadowrocketGuideIntro: 'Shadowrocket should import the chained rules through a Clash config subscription. Switch to Clash config and use an accessible Clash config link.',
-    shadowrocketSubscribeTitle: 'Add with Clash link',
-    shadowrocketStepOpen: 'Open Shadowrocket and tap the “+” button in the top-right corner.',
-    shadowrocketStepType: 'On the add-node page, tap Type and choose “Subscribe”.',
-    shadowrocketStepUrl: 'Paste the Clash config link into the URL field. The Import Clash button creates a Clash import link; deployed config URLs can also be used.',
-    shadowrocketStepSave: 'Tap Save and wait for Shadowrocket to download and refresh the Clash config node list.',
-    shadowrocketRuntimeTitle: 'Client settings',
-    shadowrocketRouteSetting: 'Global Routing: choose Config. Do not use Global or Direct, otherwise chain forwarding rules will not apply.',
-    shadowrocketEntryNode: 'Front relay node: choose a low-latency HK or JP relay node.',
-    shadowrocketExitNode: 'Residential exit node: choose the static residential IP node required for your use case.',
-    shadowrocketStartVpn: 'Start connection: tap the top switch, allow the iOS VPN prompt, enter the device passcode, and wait until the switch turns green.',
-    preview: 'Preview',
-    noOutput: 'No output',
-    emptyOutput: 'Fill entry and exit inputs to generate chained proxy config.',
-    yamlStatus: 'YAML OK',
-    jsonStatus: 'JSON OK',
-    yamlDetail: 'chain field',
-    jsonDetail: 'chain field',
-    noUploadDetail: 'session only',
-    nodes: 'Candidates',
-    chain: 'Chain',
-    selectedSummary: 'Selected nodes',
-    waitingChain: 'Waiting for entry and exit',
-    languageLabel: 'Language',
-    zhLanguage: 'Chinese',
-    enLanguage: 'English',
-    chainArrow: '→',
-  },
-} satisfies Record<Language, Record<string, string>>
+interface NodeImportContext {
+  target: StageNodeImportTarget
+  onFeedback: (feedback: NodeImportFeedback) => void
+  signal?: AbortSignal
+}
 
-const entryExample = [
-  'vless://11111111-1111-4111-8111-111111111111@203.0.113.10:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.example.com&fp=chrome&pbk=********&type=tcp&headerType=none#入口-VLESS',
-  'socks5://demo:********@203.0.113.20:1080#入口-SOCKS5',
-  'hysteria2://demo-pass@203.0.113.30:8443?sni=www.example.com&insecure=1#入口-HY2',
-  'ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpkZW1vLXBhc3M@203.0.113.40:8388#入口-SS',
-].join('\n')
-
-const exitExample = [
-  'socks5://demo:********@198.51.100.14:1193#出口-SOCKS5',
-  'hysteria2://demo-pass@198.51.100.24:8443?sni=www.example.com&insecure=1#出口-HY2',
-  'vless://22222222-2222-4222-8222-222222222222@198.51.100.34:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.example.org&fp=chrome&pbk=********&type=tcp&headerType=none#出口-VLESS',
-  'ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpkZW1vLXBhc3M@198.51.100.44:8388#出口-SS',
-].join('\n')
-
-function App() {
-  const [language, setLanguage] = useState<Language>('zh')
-  const [outputMode, setOutputMode] = useState<OutputMode>('clash')
-  const [fetchMode, setFetchMode] = useState<FetchMode>('auto')
-  const [sameOriginFetcherState, setSameOriginFetcherState] = useState<SameOriginFetcherState>('checking')
-  const [fetcherEndpoint, setFetcherEndpoint] = useState('')
-  const [fetcherToken, setFetcherToken] = useState('')
-  const [entryInput, setEntryInput] = useState('')
-  const [exitInput, setExitInput] = useState('')
-  const [entryIds, setEntryIds] = useState<string[] | undefined>()
-  const [exitIds, setExitIds] = useState<string[] | undefined>()
-  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
-  const [importState, setImportState] = useState<ImportState>('idle')
-  const [fetchState, setFetchState] = useState<Record<FetchSlot, FetchState>>({
-    entry: 'idle',
-    exit: 'idle',
-  })
-  const t = copyText[language]
-  const outputModeLabels: Record<OutputMode, string> = {
-    clash: t.outputModeClash,
-    xray: t.outputModeXray,
-    links: t.outputModeLinks,
+function selectImportedStageNodes(
+  plan: ChainPlan,
+  target: StageNodeImportTarget | undefined,
+  nodeIds: string[],
+): ChainPlan {
+  if (!target || plan.id !== target.planId || plan[target.role].id !== target.stageId) {
+    return plan
   }
-  const sameOriginFetcherAvailable = sameOriginFetcherState === 'available'
-  const showExternalFetcherFields = fetchMode === 'service'
-  const hostedFetcherStatusLabel =
-    sameOriginFetcherState === 'available'
-      ? t.hostedFetcherAvailable
-      : sameOriginFetcherState === 'checking'
-        ? t.hostedFetcherChecking
-        : t.hostedFetcherUnavailable
+  const stage = plan[target.role]
+  return {
+    ...plan,
+    [target.role]: {
+      ...stage,
+      candidateNodeIds: [...new Set([...stage.candidateNodeIds, ...nodeIds])],
+    },
+    hasInitializedSelection: true,
+  }
+}
 
-  const entryParsed = useMemo(() => parseProxyInput(entryInput), [entryInput])
-  const exitParsed = useMemo(() => parseProxyInput(exitInput), [exitInput])
-  const entryCandidates = entryParsed.nodes
-  const exitCandidates = exitParsed.nodes
+function makeClientId(prefix: string): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${prefix}-${crypto.randomUUID().slice(0, 8)}`
+  }
+  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`
+}
 
-  const selectedEntryIds = useMemo(() => resolveSelectedIds(entryIds, entryCandidates), [entryIds, entryCandidates])
-  const selectedExitIds = useMemo(() => resolveSelectedIds(exitIds, exitCandidates), [exitIds, exitCandidates])
-  const selectedEntries = useMemo(
-    () => pickSelectedNodes(entryCandidates, selectedEntryIds),
-    [entryCandidates, selectedEntryIds],
-  )
-  const selectedExits = useMemo(
-    () => pickSelectedNodes(exitCandidates, selectedExitIds),
-    [exitCandidates, selectedExitIds],
-  )
-  const selectedNodes = useMemo(() => [...selectedEntries, ...selectedExits], [selectedEntries, selectedExits])
-
-  const generated = useMemo(() => {
-    if (outputMode === 'links') {
-      return selectedNodes.length > 0 ? generateImportLinks(selectedNodes) : ''
+function parseManualPluginOpts(raw: string): Record<string, ProxyScalar> | undefined {
+  const trimmed = raw.trim()
+  if (!trimmed) {
+    return undefined
+  }
+  const result: Record<string, ProxyScalar> = {}
+  for (const part of trimmed.split(';')) {
+    const clean = part.trim()
+    if (!clean) {
+      continue
     }
-    if (outputMode === 'xray') {
-      return ''
-    }
-    if (selectedEntries.length === 0 || selectedExits.length === 0) {
-      return ''
-    }
-    return generateClashYamlForSelections(selectedEntries, selectedExits)
-  }, [outputMode, selectedEntries, selectedExits, selectedNodes])
-
-  const outputFileName =
-    outputMode === 'clash' ? 'config.yaml' : outputMode === 'xray' ? 'manual-v2rayn.txt' : 'import-links.txt'
-  const chainLabel = buildChainLabel(selectedEntries, selectedExits, t)
-  const entryIsSubscriptionUrl = isHttpSubscriptionInput(entryInput)
-  const exitIsSubscriptionUrl = isHttpSubscriptionInput(exitInput)
-  const fetchFailedMessage =
-    fetchMode === 'hosted'
-      ? t.fetchFailedHosted
-      : fetchMode === 'auto'
-        ? t.fetchFailedWithManaged
-        : fetchMode === 'service'
-          ? t.fetchFailedWithService
-          : t.fetchFailed
-
-  useEffect(() => {
-    let cancelled = false
-
-    async function detectSameOriginFetcher() {
-      try {
-        const response = await fetch('/api/healthz', { cache: 'no-store' })
-        if (!cancelled) {
-          setSameOriginFetcherState(response.ok ? 'available' : 'unavailable')
-        }
-      } catch {
-        if (!cancelled) {
-          setSameOriginFetcherState('unavailable')
-        }
+    const eqIndex = clean.indexOf('=')
+    if (eqIndex === -1) {
+      result[clean] = true
+    } else {
+      const k = clean.slice(0, eqIndex).trim()
+      const v = clean.slice(eqIndex + 1).trim()
+      if (k) {
+        result[k] = v
       }
     }
+  }
+  return Object.keys(result).length > 0 ? result : undefined
+}
 
-    // 只探测健康检查，不携带订阅地址；这样 GitHub Pages 模式也不会把用户输入泄露给不存在的 API。
-    void detectSameOriginFetcher()
+function readHasSavedWorkspace(): boolean {
+  try {
+    return Boolean(globalThis.localStorage?.getItem(LOCAL_STORAGE_KEY))
+  } catch {
+    return false
+  }
+}
 
+function downloadJsonFile(filename: string, data: unknown): void {
+  const text = JSON.stringify(data, null, 2)
+  const blob = new Blob([text], { type: 'application/json;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+interface WorkspaceState {
+  sources: NodeSource[]
+  registry: Record<string, ManagedNodeEntry>
+  plans: ChainPlan[]
+  activePlanId: string
+}
+
+function mergeImportedSource(
+  workspace: WorkspaceState,
+  source: NodeSource,
+  nodes: NormalizedProxyNode[],
+  target?: StageNodeImportTarget,
+): WorkspaceState {
+  const merged = upsertSourceNodes(workspace.registry, workspace.sources, source, nodes)
+  const nodeIds = target ? nodes.map((node) => node.id) : []
+  return {
+    ...workspace,
+    ...merged,
+    plans: workspace.plans.map((plan) =>
+      syncPlanNodeHints(selectImportedStageNodes(plan, target, nodeIds), merged.registry),
+    ),
+  }
+}
+
+export function App() {
+  const [language, setLanguage] = useState<Language>('zh')
+  const copy = COPY[language]
+
+  const [capabilities, setCapabilities] = useState<BackendCapabilities>({
+    status: 'checking',
+    fetchSubscription: false,
+    temporaryClashConfig: false,
+  })
+
+  const [workspace, setWorkspace] = useState<WorkspaceState>(() => ({
+    sources: [],
+    registry: {},
+    plans: [createDefaultChainPlan('plan-default', '默认方案')],
+    activePlanId: 'plan-default',
+  }))
+  const { sources, registry, plans, activePlanId } = workspace
+
+  const [fetchMode, setFetchMode] = useState<FetchMode>('auto')
+  const [fetcherEndpoint, setFetcherEndpoint] = useState('')
+  const [fetcherToken, setFetcherToken] = useState('')
+  const [sourceFeedback, setSourceFeedback] = useState<NodeImportFeedback | null>(null)
+  const [pendingDeleteImpact, setPendingDeleteImpact] = useState<SourceDeletionImpact | null>(
+    null,
+  )
+  // 撤销只记录本次删除的差量数据（目标来源 + 关联节点条目 + 该来源的会话订阅 URL），
+  // 撤销时基于最新工作区合并恢复，不用旧快照整体覆盖期间的新增或编辑。
+  const [undoSnapshot, setUndoSnapshot] = useState<{
+    source: NodeSource
+    nodeEntries: ManagedNodeEntry[]
+    subscriptionUrl?: string
+  } | null>(null)
+
+  const [includeCredsInLocalSave, setIncludeCredsInLocalSave] = useState(false)
+  const [hasLocalSavedData, setHasLocalSavedData] = useState<boolean>(() =>
+    readHasSavedWorkspace(),
+  )
+  const [persistenceFeedback, setPersistenceFeedback] = useState<{
+    kind: 'info' | 'error'
+    message: string
+  } | null>(null)
+
+  const [draggedRelayId, setDraggedRelayId] = useState<string | null>(null)
+
+  // 运行时仅在内存中记录订阅源 URL 与在途请求控制器（不随方案 JSON/默认持久化写入磁盘）
+  const subscriptionUrlsRef = useRef<Map<string, string>>(new Map())
+  const refreshControllersRef = useRef<Map<string, AbortController>>(new Map())
+  const refreshVersionsRef = useRef<Map<string, number>>(new Map())
+
+  useEffect(() => {
+    const controller = new AbortController()
+    probeSameOriginCapabilities({ signal: controller.signal }).then((caps) => {
+      if (!controller.signal.aborted) {
+        setCapabilities(caps)
+      }
+    })
+    return () => controller.abort()
+  }, [])
+
+  useEffect(() => {
+    const controllers = refreshControllersRef.current
     return () => {
-      cancelled = true
+      for (const controller of controllers.values()) {
+        controller.abort()
+      }
+      controllers.clear()
     }
   }, [])
 
-  function setInputValue(slot: FetchSlot, value: string) {
-    if (slot === 'entry') {
-      setEntryInput(value)
-      setEntryIds(undefined)
-    } else {
-      setExitInput(value)
-      setExitIds(undefined)
-    }
-    setFetchState((current) => ({ ...current, [slot]: 'idle' }))
-  }
+  const activePlan = useMemo(
+    () => plans.find((p) => p.id === activePlanId) ?? plans[0],
+    [plans, activePlanId],
+  )
 
-  function loadExample(slot: FetchSlot) {
-    setInputValue(slot, slot === 'entry' ? entryExample : exitExample)
-  }
-
-  async function fetchSubscription(slot: FetchSlot) {
-    const source = (slot === 'entry' ? entryInput : exitInput).trim()
-
-    if (!/^https?:\/\//i.test(source)) {
-      setFetchState((current) => ({ ...current, [slot]: 'unsupported' }))
-      return
-    }
-
-    setFetchState((current) => ({ ...current, [slot]: 'loading' }))
-    try {
-      const content = await loadSubscriptionContent(source, {
-        endpoint: fetcherEndpoint.trim(),
-        sameOriginAvailable: sameOriginFetcherAvailable,
-        token: fetcherToken.trim(),
-        mode: fetchMode,
+  const updateActivePlan = useCallback(
+    (updater: (prev: ChainPlan) => ChainPlan) => {
+      setWorkspace((prevWorkspace) => {
+        const targetId =
+          prevWorkspace.plans.find((p) => p.id === prevWorkspace.activePlanId)?.id ??
+          prevWorkspace.plans[0]?.id
+        return {
+          ...prevWorkspace,
+          plans: prevWorkspace.plans.map((plan) =>
+            plan.id === targetId ? updater(plan) : plan,
+          ),
+        }
       })
-      setInputValue(slot, content)
-      setFetchState((current) => ({ ...current, [slot]: 'success' }))
-    } catch {
-      setFetchState((current) => ({ ...current, [slot]: 'failed' }))
+    },
+    [],
+  )
+
+  const updateStage = useCallback(
+    (
+      role: 'entry' | 'relay' | 'exit',
+      stageId: string,
+      updater: (stage: ChainStage) => ChainStage,
+    ) => {
+      updateActivePlan((prev) => {
+        if (role === 'entry') {
+          return { ...prev, entry: updater(prev.entry), hasInitializedSelection: true }
+        }
+        if (role === 'exit') {
+          return { ...prev, exit: updater(prev.exit), hasInitializedSelection: true }
+        }
+        return {
+          ...prev,
+          relays: prev.relays.map((r) => (r.id === stageId ? updater(r) : r)),
+          hasInitializedSelection: true,
+        }
+      })
+    },
+    [updateActivePlan],
+  )
+
+
+  const reportImportFeedback = useCallback(
+    (feedback: NodeImportFeedback, context?: NodeImportContext) => {
+      if (!context) {
+        setSourceFeedback(feedback)
+      } else if (!context.signal?.aborted) {
+        context.onFeedback(feedback)
+      }
+    },
+    [],
+  )
+
+  const executeSubscriptionFetch = useCallback(
+    async (
+      sourceId: string,
+      sourceName: string,
+      url: string,
+      isNewSource: boolean,
+      context?: NodeImportContext,
+    ) => {
+      if (context?.signal?.aborted) {
+        return false
+      }
+      const prevController = refreshControllersRef.current.get(sourceId)
+      if (prevController) {
+        prevController.abort()
+      }
+
+      const controller = new AbortController()
+      refreshControllersRef.current.set(sourceId, controller)
+      const cancelFromNodeForm = () => controller.abort()
+      context?.signal?.addEventListener('abort', cancelFromNodeForm, { once: true })
+      const requestVersion = (refreshVersionsRef.current.get(sourceId) ?? 0) + 1
+      refreshVersionsRef.current.set(sourceId, requestVersion)
+
+      const newSource: NodeSource = {
+        id: sourceId,
+        name: sourceName,
+        kind: 'subscription',
+        nodeIds: [],
+        status: 'loading',
+      }
+      // 分层表单自行显示请求进度，成功后才在来源列表登记订阅。
+      const addAfterFetch = isNewSource && Boolean(context)
+      let imported = false
+      if (!addAfterFetch) {
+        subscriptionUrlsRef.current.set(sourceId, url)
+        setWorkspace((prev) => ({
+          ...prev,
+          sources: isNewSource
+            ? [...prev.sources, newSource]
+            : prev.sources.map((src) =>
+                src.id === sourceId ? { ...src, status: 'loading', errorMessage: undefined } : src,
+              ),
+        }))
+      }
+
+      try {
+        const rawContent = await loadSubscriptionContent(url, {
+          endpoint: fetcherEndpoint,
+          sameOriginFetchAvailable: capabilities.fetchSubscription,
+          token: fetcherToken,
+          mode: fetchMode,
+          signal: controller.signal,
+        })
+
+        if (
+          controller.signal.aborted ||
+          refreshVersionsRef.current.get(sourceId) !== requestVersion
+        ) {
+          return false
+        }
+
+        const parsed = parseProxyInputDetailed(rawContent)
+        if (
+          parsed.validCount === 0 &&
+          parsed.unsupportedCount === 0 &&
+          parsed.invalidCount === 0
+        ) {
+          throw new Error(
+            language === 'zh' ? '订阅返回为空，未识别到任何代理节点。' : 'Empty subscription response.',
+          )
+        }
+
+        if (parsed.validCount === 0) {
+          throw new Error(
+            parsed.warnings[0] ??
+              (language === 'zh'
+                ? '订阅未解析出可用节点，已保留旧节点。'
+                : 'No valid nodes parsed; previous nodes retained.'),
+          )
+        }
+
+        const lastSuccessAt = new Date().toISOString()
+        setWorkspace((prev) => {
+          const currentTarget = addAfterFetch ? newSource : prev.sources.find((s) => s.id === sourceId)
+          if (
+            !currentTarget ||
+            controller.signal.aborted ||
+            refreshVersionsRef.current.get(sourceId) !== requestVersion
+          ) {
+            return prev
+          }
+          const updatedSource: NodeSource = {
+            ...currentTarget,
+            status: 'success',
+            errorMessage: undefined,
+            lastSuccessAt,
+            parseStats: {
+              validCount: parsed.validCount,
+              unsupportedCount: parsed.unsupportedCount,
+              invalidCount: parsed.invalidCount,
+              issues: parsed.issues,
+            },
+          }
+          return mergeImportedSource(prev, updatedSource, parsed.nodes, context?.target)
+        })
+        if (addAfterFetch) {
+          subscriptionUrlsRef.current.set(sourceId, url)
+        }
+        imported = true
+
+        reportImportFeedback({
+          kind: 'info',
+          message:
+            language === 'zh'
+              ? `订阅 "${sourceName}" 更新成功：有效 ${parsed.validCount} / 不支持 ${parsed.unsupportedCount} / 无效 ${parsed.invalidCount}。`
+              : `Subscription "${sourceName}" loaded: ${parsed.validCount} valid / ${parsed.unsupportedCount} unsupported / ${parsed.invalidCount} invalid.`,
+        }, context)
+        return true
+      } catch (err) {
+        if (
+          controller.signal.aborted ||
+          refreshVersionsRef.current.get(sourceId) !== requestVersion
+        ) {
+          return false
+        }
+        const message = err instanceof Error ? err.message : String(err)
+        if (!addAfterFetch) {
+          setWorkspace((prev) => ({
+            ...prev,
+            sources: prev.sources.map((src) =>
+              src.id === sourceId ? { ...src, status: 'failed', errorMessage: message } : src,
+            ),
+          }))
+        }
+        reportImportFeedback({ kind: 'error', message }, context)
+        return false
+      } finally {
+        context?.signal?.removeEventListener('abort', cancelFromNodeForm)
+        if (refreshControllersRef.current.get(sourceId) === controller) {
+          refreshControllersRef.current.delete(sourceId)
+          if (addAfterFetch && !imported) {
+            refreshVersionsRef.current.delete(sourceId)
+          }
+        }
+      }
+    },
+    [
+      capabilities.fetchSubscription,
+      fetchMode,
+      fetcherEndpoint,
+      fetcherToken,
+      language,
+      reportImportFeedback,
+    ],
+  )
+
+  const handleAddSubscription = async (name: string, url: string, context?: NodeImportContext): Promise<boolean> => {
+    const cleanUrl = url.trim()
+    if (!cleanUrl) {
+      return false
+    }
+    const label =
+      name.trim() ||
+      (language === 'zh' ? `订阅-${sources.length + 1}` : `Sub-${sources.length + 1}`)
+    const sourceId = makeClientId('src')
+    return executeSubscriptionFetch(sourceId, label, cleanUrl, true, context)
+  }
+
+  const handleRefreshSubscription = (sourceId: string) => {
+    const target = sources.find((s) => s.id === sourceId)
+    const url = subscriptionUrlsRef.current.get(sourceId)
+    if (!target || !url) {
+      setSourceFeedback({
+        kind: 'error',
+        message:
+          language === 'zh'
+            ? '当前会话不包含该订阅的原始 URL，请通过“添加订阅”重新填入链接。'
+            : 'Subscription URL not held in memory for this source; please re-add it.',
+      })
+      return
+    }
+    void executeSubscriptionFetch(sourceId, target.name, url, false)
+  }
+
+  const handleCancelRefresh = (sourceId: string) => {
+    const controller = refreshControllersRef.current.get(sourceId)
+    if (controller) {
+      controller.abort()
+      refreshControllersRef.current.delete(sourceId)
+    }
+    setWorkspace((prev) => ({
+      ...prev,
+      sources: prev.sources.map((src) =>
+        src.id === sourceId ? { ...src, status: src.nodeIds.length > 0 ? 'success' : 'idle' } : src,
+      ),
+    }))
+  }
+
+  const handleAddPaste = (name: string, text: string, context?: NodeImportContext): boolean => {
+    const parsed = parseProxyInputDetailed(text)
+    if (parsed.validCount === 0 && parsed.unsupportedCount === 0 && parsed.invalidCount === 0) {
+      reportImportFeedback({
+        kind: 'error',
+        message: language === 'zh' ? '输入为空，未解析到节点。' : 'Empty input.',
+      }, context)
+      return false
+    }
+    if (parsed.validCount === 0) {
+      reportImportFeedback({
+        kind: 'error',
+        message:
+          parsed.issues[0]?.message ??
+          parsed.warnings[0] ??
+          (language === 'zh' ? '未能解析到受支持的节点。' : 'No supported nodes found.'),
+      }, context)
+      return false
+    }
+
+    const label =
+      name.trim() ||
+      (language === 'zh' ? `粘贴来源-${sources.length + 1}` : `Paste-${sources.length + 1}`)
+    const incoming: NodeSource = {
+      id: makeClientId('src'),
+      name: label,
+      kind: 'paste',
+      nodeIds: [],
+      status: 'success',
+      lastSuccessAt: new Date().toISOString(),
+      parseStats: {
+        validCount: parsed.validCount,
+        unsupportedCount: parsed.unsupportedCount,
+        invalidCount: parsed.invalidCount,
+        issues: parsed.issues,
+      },
+    }
+    setWorkspace((prev) => mergeImportedSource(prev, incoming, parsed.nodes, context?.target))
+    reportImportFeedback({
+      kind: 'info',
+      message:
+        language === 'zh'
+          ? `已添加 "${label}"：有效 ${parsed.validCount} / 不支持 ${parsed.unsupportedCount} / 无效 ${parsed.invalidCount}。`
+          : `Added "${label}": ${parsed.validCount} valid / ${parsed.unsupportedCount} unsupported / ${parsed.invalidCount} invalid.`,
+    }, context)
+    return true
+  }
+
+  const handleAddManual = (form: ManualNodeFormState, context?: NodeImportContext): boolean => {
+    const portNum = Number(form.port)
+    if (!form.server.trim() || !Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
+      reportImportFeedback({
+        kind: 'error',
+        message:
+          language === 'zh'
+            ? '请填写合法服务器地址与 1~65535 整数端口。'
+            : 'Provide a valid server and integer port (1-65535).',
+      }, context)
+      return false
+    }
+    const name = form.name.trim() || `${form.server.trim()}:${portNum}`
+    let yamlObj: Record<string, unknown>
+    if (form.protocol === 'vless') {
+      yamlObj = {
+        name,
+        type: 'vless',
+        server: form.server.trim(),
+        port: portNum,
+        uuid: form.uuid.trim(),
+        tls: form.security !== 'none',
+        network: form.packetType,
+        ...(form.sni.trim() ? { servername: form.sni.trim() } : {}),
+        ...(form.fp.trim() ? { 'client-fingerprint': form.fp.trim() } : {}),
+        ...(form.security === 'reality'
+          ? {
+              'reality-opts': {
+                'public-key': form.pbk.trim(),
+                ...(form.sid.trim() ? { 'short-id': form.sid.trim() } : {}),
+              },
+            }
+          : {}),
+        ...(form.packetType === 'ws'
+          ? {
+              'ws-opts': {
+                path: form.wsPath.trim() || '/',
+                ...(form.wsHost.trim() ? { headers: { Host: form.wsHost.trim() } } : {}),
+              },
+            }
+          : {}),
+        ...(form.packetType === 'grpc' && form.grpcServiceName.trim()
+          ? { 'grpc-opts': { 'grpc-service-name': form.grpcServiceName.trim() } }
+          : {}),
+        udp: form.udp,
+        ...(form.skipCertVerify ? { 'skip-cert-verify': true } : {}),
+      }
+    } else if (form.protocol === 'socks5') {
+      yamlObj = {
+        name,
+        type: 'socks5',
+        server: form.server.trim(),
+        port: portNum,
+        ...(form.username.trim() ? { username: form.username.trim() } : {}),
+        ...(form.password ? { password: form.password } : {}),
+        udp: form.udp,
+        ...(form.skipCertVerify ? { 'skip-cert-verify': true } : {}),
+      }
+    } else if (form.protocol === 'ss') {
+      const pluginOpts = parseManualPluginOpts(form.pluginOptsRaw)
+      yamlObj = {
+        name,
+        type: 'ss',
+        server: form.server.trim(),
+        port: portNum,
+        cipher: form.cipher.trim(),
+        password: form.password,
+        ...(form.plugin.trim() ? { plugin: form.plugin.trim() } : {}),
+        ...(pluginOpts ? { 'plugin-opts': pluginOpts } : {}),
+        udp: form.udp,
+      }
+    } else {
+      yamlObj = {
+        name,
+        type: 'hysteria2',
+        server: form.server.trim(),
+        port: portNum,
+        password: form.password,
+        ...(form.sni.trim() ? { sni: form.sni.trim() } : {}),
+        ...(form.hy2Obfs.trim() ? { obfs: form.hy2Obfs.trim() } : {}),
+        ...(form.hy2ObfsPassword ? { 'obfs-password': form.hy2ObfsPassword } : {}),
+        ...(form.hy2Ports.trim() ? { ports: form.hy2Ports.trim() } : {}),
+        udp: form.udp,
+        ...(form.skipCertVerify ? { 'skip-cert-verify': true } : {}),
+      }
+    }
+
+    const parsed = parseYamlProxiesDetailed(stringifyYamlConfig({ proxies: [yamlObj] }))
+    if (parsed.nodes.length === 0) {
+      reportImportFeedback({
+        kind: 'error',
+        message:
+          parsed.issues[0]?.message ??
+          parsed.warnings[0] ??
+          (language === 'zh' ? '手动节点参数不完整。' : 'Invalid manual node parameters.'),
+      }, context)
+      return false
+    }
+
+    const sourceName = language === 'zh' ? `手动-${name}` : `Manual-${name}`
+    const incoming: NodeSource = {
+      id: makeClientId('src'),
+      name: sourceName,
+      kind: 'manual',
+      nodeIds: [],
+      status: 'success',
+      lastSuccessAt: new Date().toISOString(),
+      parseStats: {
+        validCount: parsed.validCount,
+        unsupportedCount: parsed.unsupportedCount,
+        invalidCount: parsed.invalidCount,
+        issues: parsed.issues,
+      },
+    }
+    setWorkspace((prev) => mergeImportedSource(prev, incoming, parsed.nodes, context?.target))
+    reportImportFeedback({
+      kind: 'info',
+      message:
+        language === 'zh'
+          ? `已添加手动节点 “${name}”。`
+          : `Added manual node "${name}".`,
+    }, context)
+    return true
+  }
+
+  const handleRequestDeleteSource = (sourceId: string) => {
+    const impact = computeSourceDeletionImpact(registry, sources, plans, sourceId)
+    setPendingDeleteImpact(impact)
+  }
+
+  const handleConfirmDeleteSource = () => {
+    if (!pendingDeleteImpact) {
+      return
+    }
+    const targetId = pendingDeleteImpact.sourceId
+    // 取消并作废该来源在途的刷新请求，避免撤销后旧请求回写恢复的数据。
+    refreshControllersRef.current.get(targetId)?.abort()
+    refreshControllersRef.current.delete(targetId)
+    refreshVersionsRef.current.set(
+      targetId,
+      (refreshVersionsRef.current.get(targetId) ?? 0) + 1,
+    )
+
+    const deletedSource = sources.find((src) => src.id === targetId)
+    if (deletedSource) {
+      setUndoSnapshot({
+        source: deletedSource,
+        nodeEntries: Object.values(registry)
+          .filter((entry) => entry.sourceIds.includes(targetId))
+          .map((entry) => structuredClone(entry)),
+        subscriptionUrl: subscriptionUrlsRef.current.get(targetId),
+      })
+    }
+    subscriptionUrlsRef.current.delete(targetId)
+
+    setWorkspace((prev) => {
+      const next = removeSourceFromWorkspace(prev.registry, prev.sources, targetId)
+      return {
+        ...prev,
+        registry: next.registry,
+        sources: next.sources,
+      }
+    })
+    setPendingDeleteImpact(null)
+  }
+
+  const handleUndoDeleteSource = () => {
+    if (!undoSnapshot) {
+      return
+    }
+    const record = undoSnapshot
+    setWorkspace((prev) => {
+      if (prev.sources.some((src) => src.id === record.source.id)) {
+        return prev
+      }
+      const next = restoreDeletedSource(prev.registry, prev.sources, record)
+      return {
+        ...prev,
+        registry: next.registry,
+        sources: next.sources,
+      }
+    })
+    if (record.subscriptionUrl) {
+      subscriptionUrlsRef.current.set(record.source.id, record.subscriptionUrl)
+    }
+    setUndoSnapshot(null)
+  }
+
+  const handleRenameNode = (nodeId: string, newDisplayName: string) => {
+    setWorkspace((prev) => {
+      const nextReg = renameNodeDisplayAlias(prev.registry, nodeId, newDisplayName)
+      return {
+        ...prev,
+        registry: nextReg,
+        plans: prev.plans.map((p) => syncPlanNodeHints(p, nextReg)),
+      }
+    })
+  }
+
+  const handleSaveLocal = () => {
+    try {
+      const envelope = serializeWorkspaceState({
+        activePlanId: activePlan.id,
+        plans,
+        sources,
+        registry,
+        includesCredentials: includeCredsInLocalSave,
+      })
+      globalThis.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(envelope))
+      setHasLocalSavedData(true)
+      setPersistenceFeedback({
+        kind: 'info',
+        message: includeCredsInLocalSave
+          ? language === 'zh'
+            ? '已保存到本机浏览器 localStorage（含节点凭据，请注意设备安全）。'
+            : 'Saved locally including node credentials in browser localStorage.'
+          : language === 'zh'
+            ? '已仅保存方案结构与引用提示至本机 localStorage（不含任何密码或 UUID）。'
+            : 'Saved topology & node reference hints locally (without credentials).',
+      })
+    } catch (err) {
+      setPersistenceFeedback({
+        kind: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      })
     }
   }
 
-  async function copyOutput() {
-    if (!generated) {
+  const applyRestoredEnvelope = (rawJson: string, fromFile: boolean) => {
+    // 校验在任何工作区状态更新之前完成；结构无效时原工作区保持不变。
+    const restored = validateAndRestoreWorkspace(rawJson)
+    if (!restored.ok) {
+      setPersistenceFeedback({ kind: 'error', message: restored.error })
+      return
+    }
+
+    const { envelope } = restored
+    // 成功替换工作区：旧工作区的在途刷新请求、会话订阅 URL 与撤销记录不再适用，
+    // 必须清理，防止旧请求或旧撤销把数据回写到新工作区。
+    for (const controller of refreshControllersRef.current.values()) {
+      controller.abort()
+    }
+    refreshControllersRef.current.clear()
+    refreshVersionsRef.current.clear()
+    subscriptionUrlsRef.current.clear()
+    setUndoSnapshot(null)
+
+    setWorkspace((prev) => {
+      let nextRegistry: Record<string, ManagedNodeEntry>
+      if (envelope.nodes && envelope.nodes.length > 0) {
+        nextRegistry = createRegistryFromEntries(envelope.nodes)
+      } else if (fromFile) {
+        // 导入结构文件且未附带节点正文时保持现有已导入节点或空节点库以触发清晰的缺失引用提示
+        nextRegistry = prev.registry
+      } else {
+        nextRegistry = {}
+      }
+      return {
+        plans: envelope.plans,
+        activePlanId: envelope.activePlanId,
+        sources: envelope.sources,
+        registry: nextRegistry,
+      }
+    })
+
+    setPersistenceFeedback({
+      kind: 'info',
+      message: envelope.includesCredentials
+        ? language === 'zh'
+          ? '已恢复方案及本地缓存节点。'
+          : 'Restored plans and cached nodes.'
+        : language === 'zh'
+          ? '已恢复方案结构与来源清单（不含节点凭据）；请在“节点来源”中重新导入以补全缺失节点。'
+          : 'Restored plans and source metadata without credentials; re-import sources to resolve missing nodes.',
+    })
+  }
+
+  const handleImportPlanFile = async (file: File) => {
+    // 读取前先按文件元数据拦截超限文件，避免把超大内容载入内存。
+    if (file.size > MAX_PLAN_FILE_BYTES) {
+      setPersistenceFeedback({ kind: 'error', message: PLAN_FILE_TOO_LARGE_MESSAGE })
       return
     }
     try {
-      await navigator.clipboard.writeText(generated)
-      setCopyState('copied')
-    } catch {
-      setCopyState('failed')
-    } finally {
-      window.setTimeout(() => setCopyState('idle'), 1600)
+      applyRestoredEnvelope(await file.text(), true)
+    } catch (err) {
+      setPersistenceFeedback({
+        kind: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      })
     }
   }
 
-  async function importClashOutput() {
-    if (!generated || outputMode !== 'clash') {
-      return
+  const handleRestoreLocal = () => {    try {
+      const raw = globalThis.localStorage.getItem(LOCAL_STORAGE_KEY)
+      if (!raw) {
+        setHasLocalSavedData(false)
+        setPersistenceFeedback({
+          kind: 'error',
+          message: language === 'zh' ? '未发现本机保存的数据。' : 'No locally saved data found.',
+        })
+        return
+      }
+      applyRestoredEnvelope(raw, false)
+    } catch (err) {
+      setPersistenceFeedback({
+        kind: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      })
     }
+  }
 
-    setImportState('packing')
+  const handleClearLocal = () => {
     try {
-      const importUrl = await buildClashImportUrl(generated)
-      window.location.href = importUrl
-      setImportState('opened')
-    } catch {
-      setImportState('failed')
-    } finally {
-      window.setTimeout(() => setImportState('idle'), 2200)
+      globalThis.localStorage.removeItem(LOCAL_STORAGE_KEY)
+      setHasLocalSavedData(false)
+      setPersistenceFeedback({
+        kind: 'info',
+        message:
+          language === 'zh'
+            ? '已彻底清除浏览器 localStorage 中保存的方案与缓存节点。'
+            : 'Cleared all locally saved data from browser localStorage.',
+      })
+    } catch (err) {
+      setPersistenceFeedback({
+        kind: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      })
     }
   }
 
-  function downloadOutput() {
-    if (!generated) {
+  const handleExportPlanJson = () => {
+    const envelope = serializeWorkspaceState({
+      activePlanId: activePlan.id,
+      plans,
+      sources,
+      registry,
+      includesCredentials: includeCredsInLocalSave,
+    })
+    downloadJsonFile('proxy-chain-plans.json', envelope)
+  }
+
+  const handleAddRelay = () => {
+    updateActivePlan((prev) => {
+      const idx = prev.relays.length + 1
+      return {
+        ...prev,
+        relays: [
+          ...prev.relays,
+          createDefaultStage(
+            makeClientId('stage-relay'),
+            language === 'zh' ? `中转层 ${idx}` : `Relay ${idx}`,
+            true,
+            'select',
+          ),
+        ],
+      }
+    })
+  }
+
+  const handleMoveRelay = (relayId: string, direction: -1 | 1) => {
+    updateActivePlan((prev) => {
+      const index = prev.relays.findIndex((r) => r.id === relayId)
+      const targetIndex = index + direction
+      if (index === -1 || targetIndex < 0 || targetIndex >= prev.relays.length) {
+        return prev
+      }
+      const nextRelays = [...prev.relays]
+      const [moved] = nextRelays.splice(index, 1)
+      nextRelays.splice(targetIndex, 0, moved)
+      return { ...prev, relays: nextRelays }
+    })
+  }
+
+  const handleDropRelay = (targetRelayId: string) => {
+    if (!draggedRelayId || draggedRelayId === targetRelayId) {
+      setDraggedRelayId(null)
       return
     }
-    const blob = new Blob([generated], { type: 'text/plain;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = outputFileName
-    anchor.click()
-    URL.revokeObjectURL(url)
+    updateActivePlan((prev) => {
+      const from = prev.relays.findIndex((r) => r.id === draggedRelayId)
+      const to = prev.relays.findIndex((r) => r.id === targetRelayId)
+      if (from === -1 || to === -1) {
+        return prev
+      }
+      const nextRelays = [...prev.relays]
+      const [moved] = nextRelays.splice(from, 1)
+      nextRelays.splice(to, 0, moved)
+      return { ...prev, relays: nextRelays }
+    })
+    setDraggedRelayId(null)
   }
+
+  const makeStageHandlers = (role: 'entry' | 'relay' | 'exit', stage: ChainStage) => ({
+    onToggleEnabled: (enabled: boolean) =>
+      updateStage(role, stage.id, (prev) => ({ ...prev, enabled })),
+    onRenameStage: (name: string) =>
+      updateStage(role, stage.id, (prev) => ({ ...prev, name })),
+    onChangeStrategy: (strategy: SelectionStrategy) =>
+      updateStage(role, stage.id, (prev) => ({
+        ...prev,
+        strategy,
+        probe: prev.probe ?? { ...DEFAULT_PROBE_CONFIG },
+      })),
+    onChangeProbe: (field: 'url' | 'intervalSeconds' | 'toleranceMs', value: string) =>
+      updateStage(role, stage.id, (prev) => {
+        const cur = prev.probe ?? { ...DEFAULT_PROBE_CONFIG }
+        if (field === 'url') {
+          return { ...prev, probe: { ...cur, url: value } }
+        }
+        const numeric = Number(value)
+        return {
+          ...prev,
+          probe: {
+            ...cur,
+            [field]: Number.isFinite(numeric) ? numeric : 0,
+          },
+        }
+      }),
+    onToggleNode: (nodeId: string) =>
+      updateStage(role, stage.id, (prev) => {
+        const exists = prev.candidateNodeIds.includes(nodeId)
+        const nextIds = exists
+          ? prev.candidateNodeIds.filter((id) => id !== nodeId)
+          : [...prev.candidateNodeIds, nodeId]
+        return { ...prev, candidateNodeIds: nextIds }
+      }),
+    onSelectFiltered: (filteredIds: string[]) =>
+      updateStage(role, stage.id, (prev) => {
+        const merged = [...prev.candidateNodeIds]
+        const set = new Set(merged)
+        for (const id of filteredIds) {
+          if (!set.has(id)) {
+            set.add(id)
+            merged.push(id)
+          }
+        }
+        return { ...prev, candidateNodeIds: merged }
+      }),
+    onClearFiltered: (filteredIds: string[]) =>
+      updateStage(role, stage.id, (prev) => {
+        const drop = new Set(filteredIds)
+        return {
+          ...prev,
+          candidateNodeIds: prev.candidateNodeIds.filter((id) => !drop.has(id)),
+        }
+      }),
+    onClearStage: () =>
+      updateStage(role, stage.id, (prev) => ({ ...prev, candidateNodeIds: [] })),
+    onRemoveMissingRef: (nodeId: string) =>
+      updateStage(role, stage.id, (prev) => ({
+        ...prev,
+        candidateNodeIds: prev.candidateNodeIds.filter((id) => id !== nodeId),
+      })),
+  })
+
+  const exitStageHandlers = makeStageHandlers('exit', activePlan.exit)
+  const hasActiveRelays =
+    activePlan.mode === 'advanced' && activePlan.relays.some((relay) => relay.enabled)
+
+  const makeStageNodeImportActions = (
+    role: 'entry' | 'exit',
+    stage: ChainStage,
+  ): StageNodeImportActions => {
+    // 在发起导入时锁定方案与层，异步返回后不跟随当前活动方案漂移。
+    const target: StageNodeImportTarget = { planId: activePlan.id, stageId: stage.id, role }
+    return {
+      fetchViaService: fetchMode === 'service' || fetchMode === 'hosted' ||
+        (fetchMode === 'auto' && capabilities.fetchSubscription),
+      onAddPaste: (text, onFeedback) => handleAddPaste('', text, { target, onFeedback }),
+      onAddManual: (form, onFeedback) => handleAddManual(form, { target, onFeedback }),
+      onAddSubscription: (url, onFeedback, signal) =>
+        handleAddSubscription('', url, { target, onFeedback, signal }),
+    }
+  }
+
+  // 在同一份只读状态快照上同步生成预览、完整配置与客户端参考结果
+  const computed = useMemo(() => {
+    const preview = buildChainPreview(activePlan, registry)
+    const mihomoResult = validateAndExportPlan(activePlan, registry, plans, 'clash-mihomo')
+    const xrayResult = validateAndExportPlan(activePlan, registry, plans, 'xray-json')
+    return {
+      preview,
+      mihomoResult,
+      xrayResult,
+    }
+  }, [activePlan, plans, registry])
+
+  const finalEnabledStageId =
+    computed.preview.stages.find((s) => s.isFinalExit)?.stageId ?? activePlan.entry.id
+  const enabledStageCount = computed.preview.stages.length
+
+  // ---- 三步流程状态（UI 状态，不触碰 plan.mode / 节点选择 / 启用状态）----
+  const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [advChainOpen, setAdvChainOpen] = useState(false)
+  const [advSaveOpen, setAdvSaveOpen] = useState(false)
+  const [step2NextAttempted, setStep2NextAttempted] = useState(false)
+  const step1HeadingRef = useRef<HTMLHeadingElement | null>(null)
+  const step2HeadingRef = useRef<HTMLHeadingElement | null>(null)
+  const step3HeadingRef = useRef<HTMLHeadingElement | null>(null)
+
+  const registrySize = useMemo(() => Object.keys(registry).length, [registry])
+
+  // 步骤 2 可直接新增节点；步骤 3 仍必须通过完整链路校验。
+  const step3Enabled = computed.mihomoResult.valid
+  const step2BlockingErrors = computed.mihomoResult.diagnostics.filter(
+    (d) => d.severity === 'error',
+  )
+
+  const goToStep = useCallback((step: 1 | 2 | 3) => {
+    setCurrentStep(step)
+    if (step === 2) {
+      setStep2NextAttempted(false)
+    }
+    // 焦点移至该步骤标题；跳过过渡以避免滚动跳动
+    requestAnimationFrame(() => {
+      const ref =
+        step === 1 ? step1HeadingRef : step === 2 ? step2HeadingRef : step3HeadingRef
+      ref.current?.focus()
+    })
+  }, [])
+
+  const handleNextStep = useCallback(() => {
+    if (currentStep === 1) {
+      goToStep(2)
+      return
+    }
+    if (currentStep === 2) {
+      // 允许点击触发校验；不完整时留在本步并定位错误
+      if (!step3Enabled) {
+        setStep2NextAttempted(true)
+        return
+      }
+      goToStep(3)
+    }
+  }, [currentStep, goToStep, step3Enabled])
+
+  // 高级面板跳转入口：展开对应分组并定位
+  const goToFixTarget = useCallback(
+    (target: 'chain' | 'plan' | 'save') => {
+      if (target === 'chain') {
+        setAdvChainOpen(true)
+      } else {
+        setAdvSaveOpen(true)
+      }
+      setAdvancedOpen(true)
+      if (currentStep !== 2) {
+        setCurrentStep(2)
+      }
+    },
+    [currentStep],
+  )
+
+  // 步骤 2/3 的方案摘要，例如“2 个入口 · 1 层中转 · 出口节点 · 国内直连”
+  const planSummary = useMemo(() => {
+    const parts: string[] = []
+    if (language === 'zh') {
+      parts.push(`${activePlan.entry.candidateNodeIds.length} 个入口`)
+      const enabledRelays = activePlan.relays.filter((r) => r.enabled).length
+      if (enabledRelays > 0) {
+        parts.push(`${enabledRelays} 层中转`)
+      }
+      parts.push(activePlan.exit.enabled ? '出口节点' : '无出口节点')
+      parts.push(
+        activePlan.routingPreset === 'cn-direct'
+          ? '国内直连'
+          : activePlan.routingPreset === 'all-proxy'
+            ? '全部走代理'
+            : '自定义分流',
+      )
+    } else {
+      parts.push(`${activePlan.entry.candidateNodeIds.length} entr${activePlan.entry.candidateNodeIds.length === 1 ? 'y' : 'ies'}`)
+      const enabledRelays = activePlan.relays.filter((r) => r.enabled).length
+      if (enabledRelays > 0) {
+        parts.push(`${enabledRelays} relay${enabledRelays === 1 ? '' : 's'}`)
+      }
+      parts.push(activePlan.exit.enabled ? 'exit node' : 'no exit node')
+      parts.push(
+        activePlan.routingPreset === 'cn-direct'
+          ? 'CN direct'
+          : activePlan.routingPreset === 'all-proxy'
+            ? 'proxy all'
+            : 'custom routing',
+      )
+    }
+    return parts.join(' · ')
+  }, [activePlan, language])
 
   return (
-    <main className="app-shell">
+    <div className="app-shell">
       <header className="topbar">
         <div className="brand">
-          <div className="brand-mark">
+          <div className="brand-mark" aria-hidden="true">
             <ShieldCheck size={24} />
           </div>
           <div>
-            <h1>{t.appName}</h1>
-            <p>{t.subtitle}</p>
+            <h1>{copy.title}</h1>
           </div>
         </div>
+
         <div className="topbar-actions">
-          <div className="language-toggle" role="group" aria-label={t.languageLabel}>
+          <button
+            type="button"
+            className={`ghost-btn sm advanced-toggle ${advancedOpen ? 'active' : ''}`}
+            aria-expanded={advancedOpen}
+            onClick={() => setAdvancedOpen((prev) => !prev)}
+          >
+            <Settings2 size={14} aria-hidden="true" />
+            {copy.advancedSettingsBtn}
+          </button>
+          <div className="language-toggle" role="group" aria-label="Language">
             <button
               type="button"
               className={language === 'zh' ? 'active' : ''}
               onClick={() => setLanguage('zh')}
             >
-              {t.zhLanguage}
+              中文
             </button>
             <button
               type="button"
               className={language === 'en' ? 'active' : ''}
               onClick={() => setLanguage('en')}
             >
-              {t.enLanguage}
+              English
             </button>
-          </div>
-          <div className="privacy-strip" aria-label={t.privacyLabel}>
-            <span>
-              <LockKeyhole size={15} />
-              {t.localOnly}
-            </span>
-            <span>
-              <CheckCircle2 size={15} />
-              {t.noUpload}
-            </span>
           </div>
         </div>
       </header>
 
-      <section className="workspace">
-        <section className="panel input-panel" aria-labelledby="input-title">
-          <div className="panel-heading">
-            <div>
-              <h2 id="input-title">{t.inputTitle}</h2>
-              <p>{t.inputDescription}</p>
-            </div>
+      {/* 高级设置：收起后保留所有正在生效的配置 */}
+      {advancedOpen ? (
+        <section className="advanced-panel" aria-label={copy.advancedSettingsBtn}>
+          <div className="adv-env-row">
+            <span className="badge neutral">
+              {copy.envFetcherState}: {capabilities.fetchSubscription ? 'ON' : 'OFF'}
+            </span>
+            <span className="badge neutral">
+              {copy.envTempState}: {capabilities.temporaryClashConfig ? 'ON' : 'OFF'}
+            </span>
           </div>
 
-          <section className="fetcher-card" aria-label={t.fetcherTitle}>
-            <div className="fetcher-heading">
-              <div>
-                <h3>{t.fetcherTitle}</h3>
-                <p>{t.fetcherDescription}</p>
+          <div className="adv-group">
+            <button
+              type="button"
+              className="ghost-btn sm adv-group-toggle"
+              aria-expanded={advChainOpen}
+              onClick={() => setAdvChainOpen((prev) => !prev)}
+            >
+              {copy.advChainGroup}
+            </button>
+            {advChainOpen ? (
+              <div className="adv-group-body">
+                <PlanWorkspaceBar
+                language={language}
+                copy={copy}
+                plans={plans}
+                activePlan={activePlan}
+                includeCredsInLocalSave={includeCredsInLocalSave}
+                hasLocalSavedData={hasLocalSavedData}
+                  persistenceFeedback={persistenceFeedback}
+                  variant="controls"
+                onSelectPlan={(planId) =>
+                  setWorkspace((prev) => ({ ...prev, activePlanId: planId }))
+                }
+                onCreatePlan={(name) => {
+                  const newPlan = createDefaultChainPlan(makeClientId('plan'), name)
+                  setWorkspace((prev) => ({
+                    ...prev,
+                    plans: [...prev.plans, newPlan],
+                    activePlanId: newPlan.id,
+                  }))
+                }}
+                onRenamePlan={(planId, name) =>
+                  setWorkspace((prev) => ({
+                    ...prev,
+                    plans: prev.plans.map((p) => (p.id === planId ? { ...p, name } : p)),
+                  }))
+                }
+                onDuplicatePlan={(planId) => {
+                  setWorkspace((prev) => {
+                    const source = prev.plans.find((p) => p.id === planId)
+                    if (!source) {
+                      return prev
+                    }
+                    const dup = duplicateChainPlan(
+                      source,
+                      makeClientId('plan'),
+                      `${source.name} (${language === 'zh' ? '副本' : 'Copy'})`,
+                    )
+                    return {
+                      ...prev,
+                      plans: [...prev.plans, dup],
+                      activePlanId: dup.id,
+                    }
+                  })
+                }}
+                onDeletePlan={(planId) => {
+                  setWorkspace((prev) => {
+                    if (prev.plans.length <= 1) {
+                      return prev
+                    }
+                    const remaining = prev.plans.filter((p) => p.id !== planId)
+                    return {
+                      ...prev,
+                      plans: remaining,
+                      activePlanId: prev.activePlanId === planId ? remaining[0].id : prev.activePlanId,
+                    }
+                  })
+                }}
+                onSwitchMode={(mode) => updateActivePlan((prev) => ({ ...prev, mode }))}
+                onToggleIncludeCreds={setIncludeCredsInLocalSave}
+                onSaveLocal={handleSaveLocal}
+                onRestoreLocal={handleRestoreLocal}
+                onClearLocal={handleClearLocal}
+                onExportPlanJson={handleExportPlanJson}
+                onImportPlanJson={handleImportPlanFile}
+                />
+              <RoutingConfigCard
+                language={language}
+                copy={copy}
+                plan={activePlan}
+                allPlans={plans}
+                onChangePreset={(preset: RoutingPreset) =>
+                  updateActivePlan((prev) => ({ ...prev, routingPreset: preset }))
+                }
+                onAddRule={() =>
+                  updateActivePlan((prev) => ({
+                    ...prev,
+                    customRules: [
+                      ...prev.customRules,
+                      {
+                        id: makeClientId('rule'),
+                        matchType: 'DOMAIN-SUFFIX',
+                        pattern: '',
+                        target: { kind: 'plan', planId: prev.id },
+                      },
+                    ],
+                  }))
+                }
+                onUpdateRule={(ruleId, updater: (r: CustomRoutingRule) => CustomRoutingRule) =>
+                  updateActivePlan((prev) => ({
+                    ...prev,
+                    customRules: prev.customRules.map((r) => (r.id === ruleId ? updater(r) : r)),
+                  }))
+                }
+                onMoveRule={(ruleId, direction) =>
+                  updateActivePlan((prev) => {
+                    const idx = prev.customRules.findIndex((r) => r.id === ruleId)
+                    const nextIdx = idx + direction
+                    if (idx === -1 || nextIdx < 0 || nextIdx >= prev.customRules.length) {
+                      return prev
+                    }
+                    const next = [...prev.customRules]
+                    const [item] = next.splice(idx, 1)
+                    next.splice(nextIdx, 0, item)
+                    return { ...prev, customRules: next }
+                  })
+                }
+                onRemoveRule={(ruleId) =>
+                  updateActivePlan((prev) => ({
+                    ...prev,
+                    customRules: prev.customRules.filter((r) => r.id !== ruleId),
+                  }))
+                }
+                onChangeFallbackTarget={(target: CustomRoutingTarget) =>
+                  updateActivePlan((prev) => ({ ...prev, customFallbackTarget: target }))
+                }
+              />
               </div>
-              <span className={`fetcher-status ${sameOriginFetcherState}`}>
-                <CheckCircle2 size={15} />
-                {hostedFetcherStatusLabel}
-              </span>
+            ) : null}
+          </div>
+
+          <div className="adv-group">
+            <button
+              type="button"
+              className="ghost-btn sm adv-group-toggle"
+              aria-expanded={advSaveOpen}
+              onClick={() => setAdvSaveOpen((prev) => !prev)}
+            >
+              {copy.advSaveGroup}
+            </button>
+            {advSaveOpen ? (
+              <div className="adv-group-body">
+                <PlanWorkspaceBar
+                language={language}
+                copy={copy}
+                plans={plans}
+                activePlan={activePlan}
+                includeCredsInLocalSave={includeCredsInLocalSave}
+                hasLocalSavedData={hasLocalSavedData}
+                  persistenceFeedback={persistenceFeedback}
+                  variant="save"
+                onSelectPlan={(planId) =>
+                  setWorkspace((prev) => ({ ...prev, activePlanId: planId }))
+                }
+                onCreatePlan={(name) => {
+                  const newPlan = createDefaultChainPlan(makeClientId('plan'), name)
+                  setWorkspace((prev) => ({
+                    ...prev,
+                    plans: [...prev.plans, newPlan],
+                    activePlanId: newPlan.id,
+                  }))
+                }}
+                onRenamePlan={(planId, name) =>
+                  setWorkspace((prev) => ({
+                    ...prev,
+                    plans: prev.plans.map((p) => (p.id === planId ? { ...p, name } : p)),
+                  }))
+                }
+                onDuplicatePlan={(planId) => {
+                  setWorkspace((prev) => {
+                    const source = prev.plans.find((p) => p.id === planId)
+                    if (!source) {
+                      return prev
+                    }
+                    const dup = duplicateChainPlan(
+                      source,
+                      makeClientId('plan'),
+                      `${source.name} (${language === 'zh' ? '副本' : 'Copy'})`,
+                    )
+                    return {
+                      ...prev,
+                      plans: [...prev.plans, dup],
+                      activePlanId: dup.id,
+                    }
+                  })
+                }}
+                onDeletePlan={(planId) => {
+                  setWorkspace((prev) => {
+                    if (prev.plans.length <= 1) {
+                      return prev
+                    }
+                    const remaining = prev.plans.filter((p) => p.id !== planId)
+                    return {
+                      ...prev,
+                      plans: remaining,
+                      activePlanId: prev.activePlanId === planId ? remaining[0].id : prev.activePlanId,
+                    }
+                  })
+                }}
+                onSwitchMode={(mode) => updateActivePlan((prev) => ({ ...prev, mode }))}
+                onToggleIncludeCreds={setIncludeCredsInLocalSave}
+                onSaveLocal={handleSaveLocal}
+                onRestoreLocal={handleRestoreLocal}
+                onClearLocal={handleClearLocal}
+                onExportPlanJson={handleExportPlanJson}
+                onImportPlanJson={handleImportPlanFile}
+                />
+              </div>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      {/* 三步进度导航 */}
+      <nav className="step-nav" aria-label={copy.stepNavAria}>
+        <ol>
+          {([1, 2, 3] as const).map((step) => {
+            const titles = {
+              1: copy.stepImportTitle,
+              2: copy.stepChainTitle,
+              3: copy.stepExportTitle,
+            } as const
+            const accessible =
+              step !== 3 || step3Enabled
+            return (
+              <li key={step} className={currentStep === step ? 'current' : ''}>
+                <button
+                  type="button"
+                  disabled={!accessible && step !== currentStep}
+                  aria-current={currentStep === step ? 'step' : undefined}
+                  onClick={() => (accessible ? goToStep(step) : undefined)}
+                >
+                  <span className="step-index" aria-hidden="true">
+                    {step}
+                  </span>
+                  {titles[step]}
+                </button>
+              </li>
+            )
+          })}
+        </ol>
+      </nav>
+
+      <div className="chain-usage-control">
+        <div className="chain-usage-heading" id="proxy-mode-label">
+          <span className="chain-usage-icon" aria-hidden="true">
+            <Route size={18} />
+          </span>
+          <span>{copy.proxyModeLabel}</span>
+        </div>
+        <div className="chain-mode-options" role="group" aria-labelledby="proxy-mode-label">
+          <button
+            type="button"
+            className="chain-mode-option"
+            aria-pressed={!activePlan.exit.enabled}
+            onClick={() => exitStageHandlers.onToggleEnabled(false)}
+          >
+            <ArrowUpRight size={18} aria-hidden="true" />
+            <span>{hasActiveRelays ? copy.relayOnlyMode : copy.entryOnlyMode}</span>
+            <span className="chain-mode-check" aria-hidden="true">
+              {!activePlan.exit.enabled ? <Check size={13} strokeWidth={3} /> : null}
+            </span>
+          </button>
+          <button
+            type="button"
+            className="chain-mode-option"
+            aria-pressed={activePlan.exit.enabled}
+            onClick={() => exitStageHandlers.onToggleEnabled(true)}
+          >
+            <Link2 size={18} aria-hidden="true" />
+            <span>{hasActiveRelays ? copy.relayWithExitMode : copy.chainProxyMode}</span>
+            <span className="chain-mode-check" aria-hidden="true">
+              {activePlan.exit.enabled ? <Check size={13} strokeWidth={3} /> : null}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      {/* 当前链路示意：常驻导航条下方，随方案实时更新；只显示层名称与数量 */}
+      <ChainPreviewCard language={language} copy={copy} preview={computed.preview} />
+
+      <main className="workspace step-layout">
+        {/* 步骤 1：导入节点（hidden 切换，不卸载，草稿与在途请求保留） */}
+        <div className="step-pane" hidden={currentStep !== 1}>
+          <SourceManagerPanel
+            headingRef={step1HeadingRef}
+            language={language}
+            copy={copy}
+            capabilities={capabilities}
+            sources={sources}
+            registrySize={registrySize}
+            fetchMode={fetchMode}
+            fetcherEndpoint={fetcherEndpoint}
+            fetcherToken={fetcherToken}
+            pendingDeleteImpact={pendingDeleteImpact}
+            hasUndoableDeletion={Boolean(undoSnapshot)}
+            formFeedback={sourceFeedback}
+            onChangeFetchMode={setFetchMode}
+            onChangeFetcherEndpoint={setFetcherEndpoint}
+            onChangeFetcherToken={setFetcherToken}
+            onUploadError={(message) => setSourceFeedback({ kind: 'error', message })}
+            onAddSubscription={handleAddSubscription}
+            onAddPaste={handleAddPaste}
+            onAddManual={handleAddManual}
+            onRefreshSubscription={handleRefreshSubscription}
+            onCancelRefresh={handleCancelRefresh}
+            onRequestDeleteSource={handleRequestDeleteSource}
+            onConfirmDeleteSource={handleConfirmDeleteSource}
+            onCancelDeleteSource={() => setPendingDeleteImpact(null)}
+            onUndoDeleteSource={handleUndoDeleteSource}
+          />
+
+          {/* 步骤 1 底部导航 */}
+          <div className="step-footer">
+            <span />
+            <div className="step-footer-next">
+              <button
+                type="button"
+                className="primary-btn"
+                onClick={handleNextStep}
+              >
+                {copy.nextStepBtn}
+              </button>
+              {registrySize === 0 ? (
+                <span className="muted-meta">{copy.stageAddNextStepHint}</span>
+              ) : null}
             </div>
-            <div className={`fetcher-controls ${showExternalFetcherFields ? 'with-external' : 'managed-only'}`}>
-              <div className="segmented-control fetcher-mode" role="tablist" aria-label={t.fetcherTitle}>
-                {[
-                  { value: 'auto', label: t.fetcherModeAuto },
-                  { value: 'hosted', label: t.fetcherModeHosted },
-                  { value: 'direct', label: t.fetcherModeDirect },
-                  { value: 'service', label: t.fetcherModeService },
-                ].map((mode) => (
-                  <button
-                    key={mode.value}
-                    className={fetchMode === mode.value ? 'active' : ''}
-                    type="button"
-                    onClick={() => setFetchMode(mode.value as FetchMode)}
-                  >
-                    {mode.label}
-                  </button>
-                ))}
+          </div>
+        </div>
+
+        {/* 步骤 2：选择链路（不卸载；切换/收起高级设置、切换语言不改变业务状态） */}
+        <div className="step-pane" hidden={currentStep !== 2}>
+          <section className="panel card">
+            <div className="panel-header-row">
+              <div>
+                <h2 id="step-2-heading" ref={step2HeadingRef} tabIndex={-1}>
+                  {copy.stepChainTitle}
+                </h2>
+                <p className="muted-meta">
+                  {copy.currentPlanLabel}: {activePlan.name} · {planSummary}
+                  {activePlan.mode === 'advanced' ? (
+                    <button
+                      type="button"
+                      className="link-btn"
+                      onClick={() => goToFixTarget('chain')}
+                    >
+                      {copy.multiHopBadge}
+                    </button>
+                  ) : null}
+                  {activePlan.routingPreset === 'custom' ? (
+                    <button
+                      type="button"
+                      className="link-btn"
+                      onClick={() => goToFixTarget('chain')}
+                    >
+                      {copy.customRoutingBadge}
+                    </button>
+                  ) : null}
+                </p>
               </div>
-              {showExternalFetcherFields && (
-                <div className="fetcher-external-fields">
-                  <label>
-                    <span>{t.fetcherEndpointLabel}</span>
-                    <input
-                      value={fetcherEndpoint}
-                      placeholder={t.fetcherEndpointPlaceholder}
-                      spellCheck={false}
-                      onChange={(event) => setFetcherEndpoint(event.target.value)}
+            </div>
+
+            {step2NextAttempted && step2BlockingErrors.length > 0 ? (
+              <div className="feedback-banner error" role="alert">
+                {copy.step2BlockedBanner}
+              </div>
+            ) : null}
+
+            <div className="stages-stack">
+              <StageConfigCard
+                key={`entry:${activePlan.id}:${activePlan.entry.id}`}
+                language={language}
+                copy={copy}
+                role="entry"
+                nodeImport={makeStageNodeImportActions('entry', activePlan.entry)}
+                stage={activePlan.entry}
+                plan={activePlan}
+                registry={registry}
+                sources={sources}
+                isFinalExit={finalEnabledStageId === activePlan.entry.id}
+                onRenameNode={handleRenameNode}
+                showStrategyDefault={false}
+                {...makeStageHandlers('entry', activePlan.entry)}
+              />
+
+              {activePlan.mode === 'advanced' ? (
+                <div className="relays-section">
+                  <div className="relays-toolbar">
+                    <strong>
+                      {language === 'zh'
+                        ? `中转层 (${activePlan.relays.length})`
+                        : `Relay Stages (${activePlan.relays.length})`}
+                    </strong>
+                    <button
+                      type="button"
+                      className="ghost-btn xs"
+                      disabled={enabledStageCount >= MAX_ENABLED_CHAIN_LAYERS}
+                      onClick={handleAddRelay}
+                    >
+                      <Plus size={13} aria-hidden="true" />
+                      {copy.addRelayBtn}
+                    </button>
+                  </div>
+
+                  {activePlan.relays.map((relay, index) => (
+                    <StageConfigCard
+                      key={relay.id}
+                      language={language}
+                      copy={copy}
+                      role="relay"
+                      stage={relay}
+                      plan={activePlan}
+                      registry={registry}
+                      sources={sources}
+                      isFinalExit={finalEnabledStageId === relay.id}
+                      canMoveUp={index > 0}
+                      canMoveDown={index < activePlan.relays.length - 1}
+                      draggable
+                      onDragStart={() => setDraggedRelayId(relay.id)}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={() => handleDropRelay(relay.id)}
+                      onMoveUp={() => handleMoveRelay(relay.id, -1)}
+                      onMoveDown={() => handleMoveRelay(relay.id, 1)}
+                      onRemoveRelay={() =>
+                        updateActivePlan((prev) => ({
+                          ...prev,
+                          relays: prev.relays.filter((r) => r.id !== relay.id),
+                        }))
+                      }
+                      onRenameNode={handleRenameNode}
+                      showStrategyDefault={false}
+                      {...makeStageHandlers('relay', relay)}
                     />
-                  </label>
-                  <label>
-                    <span>{t.fetcherTokenLabel}</span>
-                    <input
-                      value={fetcherToken}
-                      placeholder={t.fetcherTokenPlaceholder}
-                      spellCheck={false}
-                      type="password"
-                      onChange={(event) => setFetcherToken(event.target.value)}
-                    />
-                  </label>
+                  ))}
                 </div>
-              )}
+              ) : null}
+
+              <StageConfigCard
+                key={`exit:${activePlan.id}:${activePlan.exit.id}`}
+                language={language}
+                copy={copy}
+                role="exit"
+                nodeImport={makeStageNodeImportActions('exit', activePlan.exit)}
+                stage={activePlan.exit}
+                plan={activePlan}
+                registry={registry}
+                sources={sources}
+                isFinalExit={activePlan.exit.enabled && finalEnabledStageId === activePlan.exit.id}
+                onRenameNode={handleRenameNode}
+                showStrategyDefault={false}
+                {...exitStageHandlers}
+              />
             </div>
           </section>
 
-          <div className="dual-input-grid">
-            <ProxyInputCard
-              id="entry-input"
-              title={t.entryInputTitle}
-              description={t.entryInputDescription}
-              value={entryInput}
-              lineLabel={t.lines}
-              editorLabel={t.editorLabel}
-              exampleLabel={t.examples}
-              clearLabel={t.clear}
-              fetchLabel={t.fetchSubscription}
-              fetchingLabel={t.fetchingSubscription}
-              parsedPrefix={t.parsedPrefix}
-              parsedSuffix={t.parsedSuffix}
-              parsedCount={entryCandidates.length}
-              fetchState={fetchState.entry}
-              fetchMessages={t}
-              fetchFailedMessage={fetchFailedMessage}
-              subscriptionHint={
-                entryIsSubscriptionUrl && fetchState.entry !== 'loading' && fetchState.entry !== 'success'
-                  ? t.subscriptionUrlHint
-                  : undefined
-              }
-              warnings={entryInput.trim() && !entryIsSubscriptionUrl ? entryParsed.warnings : []}
-              onChange={(value) => setInputValue('entry', value)}
-              onExample={() => loadExample('entry')}
-              onClear={() => setInputValue('entry', '')}
-              onFetch={() => fetchSubscription('entry')}
-            />
-
-            <ProxyInputCard
-              id="exit-input"
-              title={t.exitInputTitle}
-              description={t.exitInputDescription}
-              value={exitInput}
-              lineLabel={t.lines}
-              editorLabel={t.editorLabel}
-              exampleLabel={t.examples}
-              clearLabel={t.clear}
-              fetchLabel={t.fetchSubscription}
-              fetchingLabel={t.fetchingSubscription}
-              parsedPrefix={t.parsedPrefix}
-              parsedSuffix={t.parsedSuffix}
-              parsedCount={exitCandidates.length}
-              fetchState={fetchState.exit}
-              fetchMessages={t}
-              fetchFailedMessage={fetchFailedMessage}
-              subscriptionHint={
-                exitIsSubscriptionUrl && fetchState.exit !== 'loading' && fetchState.exit !== 'success'
-                  ? t.subscriptionUrlHint
-                  : undefined
-              }
-              warnings={exitInput.trim() && !exitIsSubscriptionUrl ? exitParsed.warnings : []}
-              onChange={(value) => setInputValue('exit', value)}
-              onExample={() => loadExample('exit')}
-              onClear={() => setInputValue('exit', '')}
-              onFetch={() => fetchSubscription('exit')}
-            />
-          </div>
-
-          <div className="chain-card">
-            <div className="chain-title">
-              <GitBranch size={19} />
-              <div>
-                <h3>{t.chainTitle}</h3>
-                <p>{t.chainDescription}</p>
-              </div>
-            </div>
-            <div className="chain-grid">
-              <NodeMultiSelect
-                label={t.entry}
-                nodes={entryCandidates}
-                selectedIds={selectedEntryIds}
-                emptyText={t.missingEntry}
-                selectedLabel={t.selected}
-                selectAllLabel={t.selectAll}
-                clearSelectionLabel={t.clearSelection}
-                onChange={(ids) => setEntryIds(ids)}
-              />
-              <div className="chain-arrow">{t.chainArrow}</div>
-              <NodeMultiSelect
-                label={t.exit}
-                nodes={exitCandidates}
-                selectedIds={selectedExitIds}
-                emptyText={t.missingExit}
-                selectedLabel={t.selected}
-                selectAllLabel={t.selectAll}
-                clearSelectionLabel={t.clearSelection}
-                onChange={(ids) => setExitIds(ids)}
-              />
-            </div>
-          </div>
-        </section>
-
-        <section className="panel output-panel" aria-labelledby="output-title">
-          <div className="panel-heading output-heading">
-            <div>
-              <h2 id="output-title">{t.outputTitle}</h2>
-              <p>{t.outputDescription}</p>
-            </div>
-            <div className="button-row">
-              <button
-                className="accent-button"
-                type="button"
-                disabled={!sameOriginFetcherAvailable || !generated || outputMode !== 'clash' || importState === 'packing'}
-                onClick={importClashOutput}
-              >
-                <ExternalLink size={16} />
-                {importState === 'packing'
-                  ? t.importingClash
-                  : importState === 'opened'
-                    ? t.importClashOpened
-                    : importState === 'failed'
-                      ? t.importClashFailed
-                      : t.importClash}
+          {/* 步骤 2 底部导航 */}
+          <div className="step-footer">
+            <button type="button" className="ghost-btn" onClick={() => goToStep(1)}>
+              {copy.prevStepBtn}
+            </button>
+            <div className="step-footer-next">
+              <button type="button" className="primary-btn" onClick={handleNextStep}>
+                {step3Enabled ? copy.nextStepBtn : copy.nextStepBtn}
               </button>
-              <button className="ghost-button" type="button" disabled={!generated} onClick={copyOutput}>
-                <Clipboard size={16} />
-                {copyState === 'copied' ? t.copied : copyState === 'failed' ? t.failed : t.copy}
-              </button>
-              <button className="primary-button" type="button" disabled={!generated} onClick={downloadOutput}>
-                <Download size={16} />
-                {t.download}
-              </button>
-            </div>
-          </div>
-
-          <div className="segmented-control output-tabs" role="tablist" aria-label={t.outputType}>
-            {outputModes.map((mode) => (
-              <button
-                key={mode}
-                className={outputMode === mode ? 'active' : ''}
-                type="button"
-                onClick={() => setOutputMode(mode)}
-              >
-                {outputModeLabels[mode]}
-              </button>
-            ))}
-          </div>
-
-          <div className="preview-meta">
-            <span>
-              {outputMode === 'xray' ? t.preview : `${t.preview}: ${outputFileName}`}
-            </span>
-            <span>{outputMode === 'xray' ? t.noOutput : generated ? `${generated.split(/\r?\n/).length} ${t.lines}` : t.noOutput}</span>
-          </div>
-          {outputMode === 'clash' && <ShadowrocketGuide copy={t} />}
-          {outputMode === 'xray' && <V2rayNGuide copy={t} />}
-          {outputMode !== 'xray' && (
-            <pre className="code-preview">
-              <code>{generated || t.emptyOutput}</code>
-            </pre>
-          )}
-        </section>
-      </section>
-
-      <footer className="status-bar">
-        <StatusChip ok={generated.includes('dialer-proxy') || outputMode !== 'clash'} label={t.yamlStatus} detail={t.yamlDetail} />
-        <StatusChip ok={outputMode !== 'xray'} label={t.jsonStatus} detail={t.jsonDetail} />
-        <StatusChip ok label={t.noUpload} detail={t.noUploadDetail} />
-        <div className="status-summary">
-          <span>
-            {t.nodes}: {entryCandidates.length + exitCandidates.length}
-          </span>
-          <span>
-            {t.selectedSummary}: {selectedNodes.length}
-          </span>
-          <span>
-            {t.chain}: {chainLabel}
-          </span>
-        </div>
-      </footer>
-    </main>
-  )
-}
-
-function V2rayNGuide({ copy }: { copy: Record<string, string> }) {
-  const clientSteps = [
-    copy.v2rayNStepPrepareNodes,
-    copy.v2rayNStepLandingGroup,
-    copy.v2rayNStepChainGroup,
-    copy.v2rayNStepUpstream,
-    copy.v2rayNStepDownstream,
-    copy.v2rayNStepSaveTest,
-  ]
-
-  return (
-    <section className="client-guide" aria-labelledby="v2rayn-guide-title">
-      <div className="client-guide-heading">
-        <h3 id="v2rayn-guide-title">{copy.v2rayNGuideTitle}</h3>
-      </div>
-      <div className="client-guide-grid single">
-        <div>
-          <strong>{copy.v2rayNStepsTitle}</strong>
-          <ol>
-            {clientSteps.map((step) => (
-              <li key={step}>{step}</li>
-            ))}
-          </ol>
-        </div>
-      </div>
-    </section>
-  )
-}
-
-function ShadowrocketGuide({ copy }: { copy: Record<string, string> }) {
-  const subscribeSteps = [
-    copy.shadowrocketStepOpen,
-    copy.shadowrocketStepType,
-    copy.shadowrocketStepUrl,
-    copy.shadowrocketStepSave,
-  ]
-  const runtimeSteps = [
-    copy.shadowrocketRouteSetting,
-    copy.shadowrocketEntryNode,
-    copy.shadowrocketExitNode,
-    copy.shadowrocketStartVpn,
-  ]
-
-  return (
-    <section className="client-guide" aria-labelledby="shadowrocket-guide-title">
-      <div className="client-guide-heading">
-        <h3 id="shadowrocket-guide-title">{copy.shadowrocketGuideTitle}</h3>
-        <p>{copy.shadowrocketGuideIntro}</p>
-      </div>
-      <div className="client-guide-grid">
-        <div>
-          <strong>{copy.shadowrocketSubscribeTitle}</strong>
-          <ol>
-            {subscribeSteps.map((step) => (
-              <li key={step}>{step}</li>
-            ))}
-          </ol>
-        </div>
-        <div>
-          <strong>{copy.shadowrocketRuntimeTitle}</strong>
-          <ul>
-            {runtimeSteps.map((step) => (
-              <li key={step}>{step}</li>
-            ))}
-          </ul>
-        </div>
-      </div>
-    </section>
-  )
-}
-
-interface ProxyInputCardProps {
-  id: string
-  title: string
-  description: string
-  value: string
-  lineLabel: string
-  editorLabel: string
-  exampleLabel: string
-  clearLabel: string
-  fetchLabel: string
-  fetchingLabel: string
-  parsedPrefix: string
-  parsedSuffix: string
-  parsedCount: number
-  fetchState: FetchState
-  fetchMessages: Record<string, string>
-  fetchFailedMessage: string
-  subscriptionHint?: string
-  warnings: string[]
-  onChange: (value: string) => void
-  onExample: () => void
-  onClear: () => void
-  onFetch: () => void
-}
-
-function ProxyInputCard({
-  id,
-  title,
-  description,
-  value,
-  lineLabel,
-  editorLabel,
-  exampleLabel,
-  clearLabel,
-  fetchLabel,
-  fetchingLabel,
-  parsedPrefix,
-  parsedSuffix,
-  parsedCount,
-  fetchState,
-  fetchMessages,
-  fetchFailedMessage,
-  subscriptionHint,
-  warnings,
-  onChange,
-  onExample,
-  onClear,
-  onFetch,
-}: ProxyInputCardProps) {
-  return (
-    <section className="input-card" aria-labelledby={`${id}-title`}>
-      <div className="input-card-heading">
-        <div>
-          <h3 id={`${id}-title`}>{title}</h3>
-          <p>{description}</p>
-        </div>
-        <button className="ghost-button compact" type="button" onClick={onExample}>
-          <RotateCcw size={15} />
-          {exampleLabel}
-        </button>
-      </div>
-
-      <label className="editor-label" htmlFor={id}>
-        {editorLabel}
-        <span>
-          {value.split(/\r?\n/).filter(Boolean).length} {lineLabel}
-        </span>
-      </label>
-      <textarea
-        id={id}
-        className="input-editor split-editor"
-        value={value}
-        spellCheck={false}
-        onChange={(event) => onChange(event.target.value)}
-      />
-
-      <div className="input-actions">
-        <div className="input-button-row">
-          <button className="ghost-button compact" type="button" onClick={onClear}>
-            <Trash2 size={15} />
-            {clearLabel}
-          </button>
-          <button
-            className="ghost-button compact"
-            type="button"
-            disabled={fetchState === 'loading'}
-            onClick={onFetch}
-          >
-            <SquareArrowDown size={15} />
-            {fetchState === 'loading' ? fetchingLabel : fetchLabel}
-          </button>
-        </div>
-        <div className="node-count">
-          {parsedPrefix} <strong>{parsedCount}</strong> {parsedSuffix}
-        </div>
-      </div>
-
-      {subscriptionHint && <div className="subscription-hint">{subscriptionHint}</div>}
-      {warnings.length > 0 && (
-        <div className="warnings">
-          {warnings.slice(0, 2).map((warning) => (
-            <span key={`${id}-${warning}`}>{warning}</span>
-          ))}
-        </div>
-      )}
-      {fetchState !== 'idle' && fetchState !== 'loading' && (
-        <div className={`fetch-message ${fetchState}`}>
-          {fetchState === 'success'
-            ? fetchMessages.fetchSuccess
-            : fetchState === 'unsupported'
-              ? fetchMessages.fetchUnsupported
-              : fetchFailedMessage}
-        </div>
-      )}
-    </section>
-  )
-}
-
-interface NodeMultiSelectProps {
-  label: string
-  nodes: NormalizedProxyNode[]
-  selectedIds: string[]
-  emptyText: string
-  selectedLabel: string
-  selectAllLabel: string
-  clearSelectionLabel: string
-  onChange: (value: string[]) => void
-}
-
-function NodeMultiSelect({
-  label,
-  nodes,
-  selectedIds,
-  emptyText,
-  selectedLabel,
-  selectAllLabel,
-  clearSelectionLabel,
-  onChange,
-}: NodeMultiSelectProps) {
-  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
-  const selectedCount = nodes.filter((node) => selectedSet.has(node.id)).length
-
-  function toggleNode(nodeId: string, checked: boolean) {
-    if (checked) {
-      onChange([...selectedIds, nodeId].filter((id, index, ids) => ids.indexOf(id) === index))
-      return
-    }
-    onChange(selectedIds.filter((id) => id !== nodeId))
-  }
-
-  return (
-    <section className="node-select" aria-label={label}>
-      <div className="node-select-header">
-        <span>{label}</span>
-        <span>
-          {selectedLabel} {selectedCount}/{nodes.length}
-        </span>
-      </div>
-      <div className="node-select-actions">
-        <button
-          className="ghost-button compact"
-          type="button"
-          disabled={nodes.length === 0 || selectedCount === nodes.length}
-          onClick={() => onChange(nodes.map((node) => node.id))}
-        >
-          <CheckCircle2 size={15} />
-          {selectAllLabel}
-        </button>
-        <button
-          className="ghost-button compact"
-          type="button"
-          disabled={selectedCount === 0}
-          onClick={() => onChange([])}
-        >
-          <Trash2 size={15} />
-          {clearSelectionLabel}
-        </button>
-      </div>
-      <div className="node-list" role="group" aria-label={label}>
-        {nodes.length === 0 ? (
-          <div className="node-list-empty">{emptyText}</div>
-        ) : (
-          nodes.map((node) => {
-            const checked = selectedSet.has(node.id)
-
-            return (
-              <label className={`node-option ${checked ? 'selected' : ''}`} key={node.id}>
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={(event) => toggleNode(node.id, event.target.checked)}
-                />
-                <span>
-                  {node.name} · {node.type.toUpperCase()}
+              {!step3Enabled && step2NextAttempted ? (
+                <span className="muted-meta">
+                  {copy.needFixCount.replace('%d', String(step2BlockingErrors.length))}
                 </span>
-              </label>
-            )
-          })
-        )}
-      </div>
-    </section>
-  )
-}
+              ) : null}
+            </div>
+          </div>
+        </div>
 
-function StatusChip({ ok, label, detail }: { ok: boolean; label: string; detail: string }) {
-  return (
-    <div className={`status-chip ${ok ? 'ok' : 'pending'}`}>
-      <CheckCircle2 size={19} />
-      <div>
-        <strong>{label}</strong>
-        <span>{detail}</span>
-      </div>
+        {/* 步骤 3：下载配置 */}
+        <div className="step-pane" hidden={currentStep !== 3}>
+          <OutputPanel
+            headingRef={step3HeadingRef}
+            language={language}
+            copy={copy}
+            plan={activePlan}
+            registry={registry}
+            capabilities={capabilities}
+            mihomoResult={computed.mihomoResult}
+            xrayResult={computed.xrayResult}
+            planSummary={planSummary}
+            active={currentStep === 3}
+            step2BlockingErrors={step2BlockingErrors}
+            warnings={computed.mihomoResult.diagnostics.filter((d) => d.severity === 'warning')}
+            onGoBack={() => goToStep(2)}
+            onGoFix={() => goToFixTarget('chain')}
+          />
+
+          <div className="step-footer">
+            <button type="button" className="ghost-btn" onClick={() => goToStep(2)}>
+              {copy.backToEditBtn}
+            </button>
+            <span />
+          </div>
+        </div>
+      </main>
+
+      <StatusBar
+        language={language}
+        copy={copy}
+        activePlan={activePlan}
+        mihomoResult={computed.mihomoResult}
+        currentStep={currentStep}
+      />
     </div>
   )
-}
-
-function resolveSelectedIds(selectedIds: string[] | undefined, nodes: NormalizedProxyNode[]) {
-  if (selectedIds === undefined) {
-    return nodes[0] ? [nodes[0].id] : []
-  }
-
-  const availableIds = new Set(nodes.map((node) => node.id))
-  return selectedIds.filter((id) => availableIds.has(id))
-}
-
-function pickSelectedNodes(nodes: NormalizedProxyNode[], selectedIds: string[]) {
-  const byId = new Map(nodes.map((node) => [node.id, node]))
-  return selectedIds.map((id) => byId.get(id)).filter((node): node is NormalizedProxyNode => Boolean(node))
-}
-
-function buildChainLabel(
-  selectedEntries: NormalizedProxyNode[],
-  selectedExits: NormalizedProxyNode[],
-  t: Record<string, string>,
-) {
-  if (selectedEntries.length === 0 || selectedExits.length === 0) {
-    return t.waitingChain
-  }
-
-  const entryLabel =
-    selectedEntries.length === 1 ? selectedEntries[0].name : `${selectedEntries.length} ${t.entry}`
-  const exitLabel = selectedExits.length === 1 ? selectedExits[0].name : `${selectedExits.length} ${t.exit}`
-  return `${entryLabel} ${t.chainArrow} ${exitLabel}`
-}
-
-function isHttpSubscriptionInput(value: string) {
-  const text = value.trim()
-
-  // 这里仅识别“输入框里只有一个 http(s) 地址”的场景。
-  // 如果用户粘贴的是完整 YAML，里面可能包含 URL 字段，不能误判为订阅地址。
-  return /^https?:\/\/\S+$/i.test(text)
-}
-
-async function loadSubscriptionContent(
-  sourceUrl: string,
-  options: { endpoint: string; sameOriginAvailable: boolean; token: string; mode: FetchMode },
-) {
-  if (options.mode === 'hosted') {
-    return fetchSameOriginSubscription(sourceUrl)
-  }
-
-  if (options.mode === 'service') {
-    return fetchViaSubscriptionService(sourceUrl, options)
-  }
-
-  if (options.mode === 'direct') {
-    return fetchDirectSubscription(sourceUrl)
-  }
-
-  if (options.sameOriginAvailable) {
-    try {
-      return await fetchSameOriginSubscription(sourceUrl)
-    } catch {
-      // 同源 Worker 可用但拉取失败时，继续尝试浏览器直连，给临时故障留一条退路。
-    }
-  }
-
-  return fetchDirectSubscription(sourceUrl)
-}
-
-async function fetchDirectSubscription(sourceUrl: string) {
-  // 订阅拉取只在用户点击后发生；不会自动请求，也不会经过后端保存或转发。
-  const response = await fetch(sourceUrl, { cache: 'no-store' })
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`)
-  }
-  return response.text()
-}
-
-async function fetchSameOriginSubscription(sourceUrl: string) {
-  // Cloudflare Worker 托管模式下，真实订阅拉取发生在同源 /api 后端；
-  // 浏览器不需要携带 Worker 地址或 token，自然也不会把这些凭据暴露给用户。
-  const response = await fetch('/api/fetch-subscription', {
-    method: 'POST',
-    cache: 'no-store',
-    credentials: 'same-origin',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({ url: sourceUrl }),
-  })
-
-  if (!response.ok) {
-    throw new Error(`same-origin fetcher HTTP ${response.status}`)
-  }
-
-  return readFetcherContent(response)
-}
-
-async function buildClashImportUrl(configYaml: string) {
-  const configUrl = await createTemporaryClashConfigUrl(configYaml)
-  return `clash://install-config?url=${encodeURIComponent(configUrl)}`
-}
-
-async function createTemporaryClashConfigUrl(configYaml: string) {
-  const response = await fetch('/api/clash-config', {
-    method: 'POST',
-    cache: 'no-store',
-    credentials: 'same-origin',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({ content: configYaml }),
-  })
-
-  if (!response.ok) {
-    throw new Error(`temporary config HTTP ${response.status}`)
-  }
-
-  const payload = await response.json() as { url?: unknown }
-  if (typeof payload.url !== 'string') {
-    throw new Error('temporary config URL missing')
-  }
-  return new URL(payload.url, window.location.origin).toString()
-}
-
-async function fetchViaSubscriptionService(
-  sourceUrl: string,
-  options: { endpoint: string; token: string },
-) {
-  if (!options.endpoint || !options.token) {
-    throw new Error('subscription fetcher endpoint and token are required')
-  }
-
-  const response = await fetch(options.endpoint, {
-    method: 'POST',
-    cache: 'no-store',
-    headers: {
-      authorization: `Bearer ${options.token}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({ url: sourceUrl }),
-  })
-
-  if (!response.ok) {
-    throw new Error(`fetcher HTTP ${response.status}`)
-  }
-
-  return readFetcherContent(response)
-}
-
-async function readFetcherContent(response: Response) {
-  const payload = await response.json() as { content?: unknown }
-  if (typeof payload.content !== 'string') {
-    throw new Error('fetcher response missing content')
-  }
-  return payload.content
 }
 
 export default App

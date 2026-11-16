@@ -1,17 +1,58 @@
 export type {
-  BaseProxyNode,
   ChainConfigOptions,
   ChainSelectionConfigOptions,
+} from './legacy-types'
+
+export type {
+  BaseProxyNode,
+  BatchPlanExportItem,
+  ChainDiagnostic,
+  ChainExportResult,
+  ChainPlan,
+  ChainPreviewCandidate,
+  ChainPreviewModel,
+  ChainPreviewStage,
+  ChainStage,
+  CustomRoutingMatchType,
+  CustomRoutingRule,
+  CustomRoutingTarget,
+  DetailedParseResult,
+  DiagnosticSeverity,
   Hysteria2ProxyNode,
+  ManagedNodeEntry,
+  NodeDiagnostic,
+  NodeReferenceHint,
+  NodeSource,
   NormalizedProxyNode,
+  NormalizedProxyNodeWithoutId,
+  ParseIssue,
   ParseResult,
   ProxyNodeType,
+  ProxyScalar,
+  RoutingPreset,
+  SavedWorkspaceEnvelope,
+  SelectionStrategy,
   ShadowsocksProxyNode,
   Socks5ProxyNode,
+  SourceDeletionImpact,
+  SourceKind,
+  SourceStatus,
+  StageProbeConfig,
+  TargetFormat,
+  VlessGrpcOpts,
   VlessProxyNode,
-} from './proxy-chain'
+  VlessSecurity,
+  VlessWsOpts,
+} from './types'
+
+export type { BackendCapabilities, FetchMode } from './backend'
+
+export { sha256Hex } from './hash'
 
 export {
+  PROTOCOL_CAPABILITY_MATRIX,
+  computeConnectionFingerprint,
+  computeStableNodeId,
   generateClashYaml,
   generateClashYamlForSelections,
   generateImportLinks,
@@ -19,8 +60,55 @@ export {
   generateXrayJsonForSelections,
   parseHysteria2Link,
   parseProxyInput,
+  parseProxyInputDetailed,
   parseShadowsocksLink,
   parseSocks5Link,
   parseVlessLink,
   parseYamlProxies,
+  parseYamlProxiesDetailed,
+  stringifyYamlConfig,
+  toClashProxy,
+  toImportLink,
+  toXrayOutbound,
+  validateNodeForFormat,
 } from './proxy-chain'
+
+export {
+  DEFAULT_PROBE_CONFIG,
+  MAX_ENABLED_CHAIN_LAYERS,
+  MAX_PLAN_FILE_BYTES,
+  PLAN_FILE_TOO_LARGE_MESSAGE,
+  WORKSPACE_SCHEMA_VERSION,
+  buildBatchPlanExports,
+  buildChainPreview,
+  computeSourceDeletionImpact,
+  createDefaultChainPlan,
+  createDefaultStage,
+  duplicateChainPlan,
+  exportSelectedNodesAsLinks,
+  getEnabledStagesForPlan,
+  createRegistryFromEntries,
+  readNodeHint,
+  readRegistryEntry,
+  removeSourceFromWorkspace,
+  renameNodeDisplayAlias,
+  restoreDeletedSource,
+  sanitizeExportFileName,
+  serializeWorkspaceState,
+  syncPlanNodeHints,
+  upsertSourceNodes,
+  validateAndExportPlan,
+  validateAndRestoreWorkspace,
+} from './orchestrator'
+
+export { classifyUnifiedInput } from './unified-input'
+export type { UnifiedInputKind } from './unified-input'
+
+export {
+  buildClashImportUrl,
+  createTemporaryClashConfigUrl,
+  loadSubscriptionContent,
+  looksLikeHtmlDocument,
+  parseHealthzPayload,
+  probeSameOriginCapabilities,
+} from './backend'

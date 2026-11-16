@@ -6,8 +6,16 @@ compatibility_date = "2026-06-21"
 directory = "../dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
-run_worker_first = ["/api/*"]
+run_worker_first = ["/api/*", "/proxy-chain/api/*"]
 
 [[services]]
 binding = "SUBSCRIPTION_FETCHER"
 service = "proxy-chain-subscription-fetcher"
+
+[[durable_objects.bindings]]
+name = "CLASH_CONFIG_STORE"
+class_name = "TemporaryClashConfigStore"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TemporaryClashConfigStore"]

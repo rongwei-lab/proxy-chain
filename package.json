@@ -16,7 +16,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc -b",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:backend": "vitest run tests/"
   },
   "dependencies": {
     "lucide-react": "^1.21.0",

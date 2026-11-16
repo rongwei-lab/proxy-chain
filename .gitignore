@@ -11,6 +11,8 @@ node_modules
 dist
 dist-ssr
 *.local
+.env.fetcher
+.env*.local
 .dev.vars
 cloudflare/.dev.vars
 cloudflare/.wrangler/
@@ -19,6 +21,7 @@ cloudflare/.wrangler/
 .vscode/*
 !.vscode/extensions.json
 .idea
+.miaoyan-conflicts/
 .DS_Store
 *.suo
 *.ntvs*
